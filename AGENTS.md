@@ -14,7 +14,7 @@ A Bun + Effect.ts CLI for reading remote Anthropic-style skills without installi
 
 | Source | Identifier | Search? | Read? | List? |
 |---|---|---|---|---|
-| `skills-sh` | `<owner>/<repo>/<skill-path>` | ✓ (skills.sh API) | ✓ (resolves to GitHub raw, multi-candidate probe) | ✓ (GitHub Contents API against resolved root) |
+| `skills-sh` | `<owner>/<repo>/<skill-path>` | ✓ (skills.sh API) | ✓ (3-step cascade: GitHub raw → unpkg → skills.sh page) | ✓ (GitHub Contents API against resolved root) |
 | `github` | `<owner>/<repo>/<path>` | — | ✓ (raw.githubusercontent.com) | ✓ (GitHub Contents API) |
 | `well-known` | `<host-or-base-url>` | ✓ (fetches `/.well-known/skills/index.json`) | ✓ | ✓ (derives from `files` array in index; `NotFound` if no `files`) |
 | `https` | full `https://…md` URL | — | ✓ (must end in `.md`) | — |
@@ -28,6 +28,44 @@ The boundary between `identifier` and `subpath` is detected heuristically in `sr
 3. Otherwise the whole path is the identifier and `SKILL.md` is fetched.
 
 `https://` URIs skip subpath detection — the URL is fetched as-is.
+
+## skills-sh resolution cascade
+
+`read` (and the `list`-supporting `resolveSkillsShRoot`) runs a 3-step cascade to locate a skill's SKILL.md:
+
+### Step 1 — GitHub raw probe (existing)
+
+Probes 4 candidate raw roots in order:
+- `https://raw.githubusercontent.com/{owner}/{repo}/HEAD/{skillPath}/SKILL.md`
+- `…/skills/{skillPath}/SKILL.md`
+- `…/.agents/skills/{skillPath}/SKILL.md`
+- `…/.claude/skills/{skillPath}/SKILL.md`
+
+First 200 → resolved root cached as `{ _tag: "BaseUrl"; baseUrl: string }`. Subsequent reads append `/<subpathOrSKILL.md>`.
+
+### Step 2 — unpkg fallback
+
+Triggered when all 4 GitHub candidates 404. Some skills ship SKILL.md only in their npm package (generated at build time), not in the GitHub repo.
+
+1. Fetch `https://raw.githubusercontent.com/{owner}/{repo}/HEAD/package.json`. If not 200 or not parseable, skip.
+2. Read `name` from the JSON.
+3. Probe `https://unpkg.com/{name}@latest/SKILL.md`. If 200, cache root as `{ _tag: "BaseUrl"; baseUrl: "https://unpkg.com/{name}@latest" }`.
+
+### Step 3 — skills.sh detail page (install command only)
+
+Triggered when unpkg also 404s. Fetches `https://www.skills.sh/{owner}/{repo}/{skillId}` and extracts the `npx skills add …` install command from the rendered HTML.
+
+**No SKILL.md content recovery**: skills.sh uses Next.js App Router — there is no `__NEXT_DATA__` blob and SKILL.md is rendered as HTML only, not embedded as raw markdown. Step 3 only provides the install command to include in the `NotFound` error message.
+
+### `ResolvedSkillRoot` type
+
+```ts
+type ResolvedSkillRoot =
+  | { readonly _tag: "BaseUrl"; readonly baseUrl: string }
+  | { readonly _tag: "Content"; readonly content: string }
+```
+
+Cached in `SkillsShCache` (`Ref<Map<string, ResolvedSkillRoot>>`). `Content`-kind roots (reserved for future use) only serve `SKILL.md` from the cached string; any other subpath returns `NotFound` with a "dynamically generated" message.
 
 ## Source plugin contract
 
