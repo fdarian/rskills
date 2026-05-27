@@ -84,7 +84,3 @@ rskills inherits incur's agent-friendly defaults:
 - `--token-count`, `--token-limit`, `--token-offset` — token-aware output
 
 Run `rskills --help` for the full list.
-
-## License
-
-MIT

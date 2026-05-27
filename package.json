@@ -3,6 +3,7 @@
 	"version": "0.1.0",
 	"description": "Read remote Anthropic-style skills without installing them",
 	"type": "module",
+	"license": "Apache-2.0",
 	"bin": {
 		"rskills": "./src/cli.ts"
 	},
