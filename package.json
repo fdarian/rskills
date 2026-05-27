@@ -1,0 +1,26 @@
+{
+	"name": "rskills",
+	"version": "0.1.0",
+	"description": "Read remote Anthropic-style skills without installing them",
+	"type": "module",
+	"bin": {
+		"rskills": "./src/cli.ts"
+	},
+	"scripts": {
+		"build": "bun build src/cli.ts --outdir dist --target=bun",
+		"typecheck": "tsc --noEmit",
+		"format": "biome check --write .",
+		"lint": "biome check ."
+	},
+	"dependencies": {
+		"@effect/platform": "latest",
+		"effect": "latest",
+		"incur": "^0.4.7"
+	},
+	"devDependencies": {
+		"@biomejs/biome": "latest",
+		"@types/bun": "latest",
+		"typescript": "latest"
+	},
+	"packageManager": "bun@1.1.0"
+}
