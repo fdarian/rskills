@@ -7,7 +7,10 @@ import type { SkillSource } from "./source.js"
 export const UrlSource: SkillSource = {
 	scheme: "https",
 
-	read: Effect.fn("UrlSource.read")(function* (uri: ParsedUri) {
+	read: Effect.fn("UrlSource.read")(function* (
+		uri: ParsedUri,
+		_options?: import("./source.js").SkillReadOptions,
+	) {
 		const url = uri.identifier
 
 		if (!url.endsWith(".md")) {

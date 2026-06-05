@@ -1,4 +1,4 @@
-import type { FileSystem, HttpClient, Path } from "@effect/platform"
+import type { CommandExecutor, FileSystem, HttpClient, Path } from "@effect/platform"
 import { Console, Effect } from "effect"
 import {
 	type FetchFailed,
@@ -14,7 +14,7 @@ import { ClaudeSource } from "./claude.js"
 import { GitHubSource } from "./github.js"
 import { SkillsShSource } from "./skills-sh.js"
 import type { SkillsShCache } from "./skills-sh-cache.js"
-import type { SkillEntry, SkillSearchResult, SkillSource } from "./source.js"
+import type { SkillEntry, SkillReadOptions, SkillSearchResult, SkillSource } from "./source.js"
 import { UrlSource } from "./url.js"
 import { WellKnownSource } from "./well-known.js"
 
@@ -40,6 +40,7 @@ export function resolveSource(
 
 export function readFromUri(
 	uri: ParsedUri,
+	options?: SkillReadOptions,
 ): Effect.Effect<
 	string,
 	| FetchFailed
@@ -49,11 +50,15 @@ export function readFromUri(
 	| InvalidArgument
 	| IsDirectory
 	| UnsupportedScheme,
-	HttpClient.HttpClient | SkillsShCache | FileSystem.FileSystem | Path.Path
+	| HttpClient.HttpClient
+	| SkillsShCache
+	| FileSystem.FileSystem
+	| Path.Path
+	| CommandExecutor.CommandExecutor
 > {
 	return Effect.gen(function* () {
 		const source = yield* resolveSource(uri.scheme)
-		return yield* source.read(uri)
+		return yield* source.read(uri, options)
 	})
 }
 

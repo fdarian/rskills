@@ -4,7 +4,8 @@ import { Effect, Option } from "effect"
 import { FetchFailed, IsDirectory, NotFound } from "#/errors.js"
 import type { ParsedUri } from "#/uri.js"
 import { serialize } from "#/uri.js"
-import type { SkillEntry, SkillSource } from "./source.js"
+import { preprocessClaudeSkillContent } from "./claude-preprocess.js"
+import type { SkillEntry, SkillReadOptions, SkillSource } from "./source.js"
 
 // Plugin roots (~/.claude/plugins/**/skills/) and a project/user namespace
 // disambiguator (`claude://user/<name>`) are possible future additions.
@@ -153,13 +154,14 @@ const resolveListDirectory = Effect.fn("ClaudeSource.resolveListDirectory")(func
 export const ClaudeSource: SkillSource = {
 	scheme: "claude",
 
-	read: Effect.fn("ClaudeSource.read")(function* (uri: ParsedUri) {
+	read: Effect.fn("ClaudeSource.read")(function* (uri: ParsedUri, options?: SkillReadOptions) {
 		if (uri.identifier.includes("/")) {
 			return yield* new NotFound({
 				message: `Invalid claude identifier: skill name must be a single segment (got "${uri.identifier}")`,
 			})
 		}
-		return yield* resolveReadFile(uri)
+		const content = yield* resolveReadFile(uri)
+		return yield* preprocessClaudeSkillContent(content, options)
 	}),
 
 	list: Effect.fn("ClaudeSource.list")(function* (uri: ParsedUri) {

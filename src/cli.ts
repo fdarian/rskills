@@ -25,11 +25,20 @@ cli.command("read", {
 	args: z.object({
 		uri: z.string().describe("URI to read (e.g. github://owner/repo/path or https://...)"),
 	}),
+	options: z.object({
+		raw: z
+			.boolean()
+			.optional()
+			.describe(
+				"Return literal file bytes for claude:// (no frontmatter strip, no !` shell execution)",
+			),
+	}),
 	output: z.string(),
 	async run(c) {
 		const effect = Effect.gen(function* () {
 			const parsed = yield* parse(c.args.uri)
-			return yield* readFromUri(parsed)
+			const readOptions = c.options.raw === true ? { raw: true } : undefined
+			return yield* readFromUri(parsed, readOptions)
 		})
 		try {
 			return await Effect.runPromise(effect.pipe(Effect.provide(runtimeLayer)))
