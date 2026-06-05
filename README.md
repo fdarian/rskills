@@ -23,6 +23,8 @@ rskills read https://example.com/some/SKILL.md
 # Fetch a sub-resource (references, scripts, templates, assets, or any .md sibling)
 rskills read github://anthropics/skills/skills/pdf/reference.md
 rskills read skills-sh://vercel-labs/skills/references/foo.md
+rskills read claude://disable-model-invocation
+rskills read claude://disable-model-invocation/references/api.md
 ```
 
 ### List
@@ -35,6 +37,7 @@ rskills ls skills-sh://anthropics/skills/xlsx
 # List a subdirectory within a skill
 rskills ls github://anthropics/skills/skills/xlsx/scripts
 rskills ls skills-sh://anthropics/skills/xlsx/scripts
+rskills ls claude://disable-model-invocation
 ```
 
 `ls` mirrors Anthropic's `ls`/`Glob` tools — it lists directory entries, while `read` fetches file content. Reading a directory path with `read` will error and suggest using `ls` instead.
@@ -57,6 +60,9 @@ rskills search react --limit 5 --format json   # switch output format
 | `github` | `github://anthropics/skills/skills/pdf` | — | ✓ | ✓ |
 | `well-known` | `well-known://mintlify.com/docs` | ✓ | ✓ | ✓ (requires `files` array in index) |
 | `https` | `https://example.com/SKILL.md` (must end in `.md`) | — | ✓ | — |
+| `claude` | `claude://disable-model-invocation` | — | ✓ (local) | ✓ |
+
+Local `claude` skills resolve under `<cwd>/.claude/skills/` then `~/.claude/skills/` (first match wins).
 
 ### Subpath detection
 

@@ -18,6 +18,7 @@ A Bun + Effect.ts CLI for reading remote Anthropic-style skills without installi
 | `github` | `<owner>/<repo>/<path>` | — | ✓ (raw.githubusercontent.com) | ✓ (GitHub Contents API) |
 | `well-known` | `<host-or-base-url>` | ✓ (fetches `/.well-known/skills/index.json`) | ✓ | ✓ (derives from `files` array in index; `NotFound` if no `files`) |
 | `https` | full `https://…md` URL | — | ✓ (must end in `.md`) | — |
+| `claude` | `<skill-name>` (single segment) | — | ✓ (local filesystem) | ✓ |
 
 ## Subpath rules
 
@@ -28,6 +29,17 @@ The boundary between `identifier` and `subpath` is detected heuristically in `sr
 3. Otherwise the whole path is the identifier and `SKILL.md` is fetched.
 
 `https://` URIs skip subpath detection — the URL is fetched as-is.
+
+## claude local resolution
+
+First non-HTTP source — reads via `@effect/platform` `FileSystem` + `Path` (Bun layers in `cli.ts`), not `HttpClient`.
+
+Resolve `<skill-name>` against Claude Code skill roots in order; first existing path wins:
+
+1. `<cwd>/.claude/skills/<name>/<subpath-or-SKILL.md>` (project, relative to process cwd)
+2. `~/.claude/skills/<name>/<subpath-or-SKILL.md>` (personal; `~` via `os.homedir()`)
+
+`NotFound` lists probed absolute paths. Plugin roots (`~/.claude/plugins/**/skills/`) and `claude://user/<name>` are deferred (see comment in `src/sources/claude.ts`).
 
 ## skills-sh resolution cascade
 
@@ -82,7 +94,7 @@ interface SkillSource {
   read: (uri: ParsedUri) => Effect.Effect<
     string,
     FetchFailed | NotFound | ParseFailed | RateLimited | InvalidArgument | IsDirectory,
-    HttpClient.HttpClient | SkillsShCache
+    HttpClient.HttpClient | SkillsShCache | FileSystem.FileSystem | Path.Path
   >
   search?: (query: string, limit: number) => Effect.Effect<
     SkillSearchResult[],
@@ -92,7 +104,7 @@ interface SkillSource {
   list?: (uri: ParsedUri) => Effect.Effect<
     ReadonlyArray<SkillEntry>,
     FetchFailed | NotFound | ParseFailed | RateLimited | InvalidArgument,
-    HttpClient.HttpClient | SkillsShCache
+    HttpClient.HttpClient | SkillsShCache | FileSystem.FileSystem | Path.Path
   >
 }
 ```
@@ -104,7 +116,7 @@ To add a new source:
 2. Export a `SkillSource` object
 3. Register it in `src/sources/registry.ts` (`allSources` array)
 
-The runtime layer in `src/cli.ts` is `Layer.merge(FetchHttpClient.layer, SkillsShCacheLive)`. If a new source needs its own service (cache, auth, etc.), merge it in there.
+The runtime layer in `src/cli.ts` is `Layer.mergeAll(FetchHttpClient.layer, SkillsShCacheLive, BunContext.layer)` — HTTP sources use `FetchHttpClient`; `claude` uses `BunContext` for `FileSystem` + `Path`. Merge additional services there as needed.
 
 ## Stack
 
