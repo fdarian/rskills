@@ -41,6 +41,12 @@ Resolve `<skill-name>` against Claude Code skill roots in order; first existing 
 
 `NotFound` lists probed absolute paths. Plugin roots (`~/.claude/plugins/**/skills/`) and `claude://user/<name>` are deferred (see comment in `src/sources/claude.ts`).
 
+**Post-read processing** (`src/sources/claude-preprocess.ts`, default-on; `read --raw` skips):
+
+- Strip YAML frontmatter (`---` … `---`); `shell` field selects `bash` (default) or `powershell` for inline execution.
+- Execute inline `` !`cmd` `` (only when `!` is line-start or whitespace-prefixed; `KEY=!`cmd`` stays literal) and fenced ` ```! ` blocks; substitute stdout once (no re-scan). Non-zero exit still substitutes stdout.
+- Honor `disableSkillShellExecution: true` in `<cwd>/.claude/settings.json` or `~/.claude/settings.json` — commands become `[shell command execution disabled by policy]`.
+
 ## skills-sh resolution cascade
 
 `read` (and the `list`-supporting `resolveSkillsShRoot`) runs a 3-step cascade to locate a skill's SKILL.md:
@@ -94,7 +100,7 @@ interface SkillSource {
   read: (uri: ParsedUri) => Effect.Effect<
     string,
     FetchFailed | NotFound | ParseFailed | RateLimited | InvalidArgument | IsDirectory,
-    HttpClient.HttpClient | SkillsShCache | FileSystem.FileSystem | Path.Path
+    HttpClient.HttpClient | SkillsShCache | FileSystem.FileSystem | Path.Path | CommandExecutor.CommandExecutor
   >
   search?: (query: string, limit: number) => Effect.Effect<
     SkillSearchResult[],
