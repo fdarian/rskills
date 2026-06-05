@@ -15,6 +15,7 @@
 	},
 	"dependencies": {
 		"@effect/platform": "latest",
+		"@effect/platform-bun": "^0.90.0",
 		"effect": "latest",
 		"incur": "^0.4.7"
 	},

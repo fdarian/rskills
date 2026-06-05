@@ -1,4 +1,4 @@
-import type { HttpClient } from "@effect/platform"
+import type { FileSystem, HttpClient, Path } from "@effect/platform"
 import { Console, Effect } from "effect"
 import {
 	type FetchFailed,
@@ -10,6 +10,7 @@ import {
 	UnsupportedScheme,
 } from "../errors.js"
 import type { ParsedUri } from "../uri.js"
+import { ClaudeSource } from "./claude.js"
 import { GitHubSource } from "./github.js"
 import { SkillsShSource } from "./skills-sh.js"
 import type { SkillsShCache } from "./skills-sh-cache.js"
@@ -17,7 +18,13 @@ import type { SkillEntry, SkillSearchResult, SkillSource } from "./source.js"
 import { UrlSource } from "./url.js"
 import { WellKnownSource } from "./well-known.js"
 
-const allSources: SkillSource[] = [SkillsShSource, WellKnownSource, GitHubSource, UrlSource]
+const allSources: SkillSource[] = [
+	SkillsShSource,
+	WellKnownSource,
+	GitHubSource,
+	UrlSource,
+	ClaudeSource,
+]
 
 export function resolveSource(
 	scheme: string,
@@ -42,7 +49,7 @@ export function readFromUri(
 	| InvalidArgument
 	| IsDirectory
 	| UnsupportedScheme,
-	HttpClient.HttpClient | SkillsShCache
+	HttpClient.HttpClient | SkillsShCache | FileSystem.FileSystem | Path.Path
 > {
 	return Effect.gen(function* () {
 		const source = yield* resolveSource(uri.scheme)
@@ -55,7 +62,7 @@ export function listFromUri(
 ): Effect.Effect<
 	ReadonlyArray<SkillEntry>,
 	FetchFailed | NotFound | ParseFailed | RateLimited | InvalidArgument | UnsupportedScheme,
-	HttpClient.HttpClient | SkillsShCache
+	HttpClient.HttpClient | SkillsShCache | FileSystem.FileSystem | Path.Path
 > {
 	return Effect.gen(function* () {
 		const source = yield* resolveSource(uri.scheme)

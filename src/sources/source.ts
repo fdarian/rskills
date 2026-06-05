@@ -1,4 +1,4 @@
-import type { HttpClient } from "@effect/platform"
+import type { FileSystem, HttpClient, Path } from "@effect/platform"
 import type { Effect } from "effect"
 import type {
 	FetchFailed,
@@ -29,7 +29,7 @@ export interface SkillSource {
 	) => Effect.Effect<
 		string,
 		FetchFailed | NotFound | ParseFailed | RateLimited | InvalidArgument | IsDirectory,
-		HttpClient.HttpClient | SkillsShCache
+		HttpClient.HttpClient | SkillsShCache | FileSystem.FileSystem | Path.Path
 	>
 	readonly search?: (
 		query: string,
@@ -40,6 +40,6 @@ export interface SkillSource {
 	) => Effect.Effect<
 		ReadonlyArray<SkillEntry>,
 		FetchFailed | NotFound | ParseFailed | RateLimited | InvalidArgument,
-		HttpClient.HttpClient | SkillsShCache
+		HttpClient.HttpClient | SkillsShCache | FileSystem.FileSystem | Path.Path
 	>
 }

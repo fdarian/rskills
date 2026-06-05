@@ -1,7 +1,7 @@
 import { Effect, Option } from "effect"
 import { ParseFailed, UnsupportedScheme } from "./errors.js"
 
-export type Scheme = "skills-sh" | "well-known" | "github" | "https"
+export type Scheme = "skills-sh" | "well-known" | "github" | "https" | "claude"
 
 export interface ParsedUri {
 	readonly scheme: Scheme
@@ -47,7 +47,12 @@ export function parse(
 		const scheme = uriString.slice(0, schemeSeparatorIndex)
 		const rest = uriString.slice(schemeSeparatorIndex + 3)
 
-		if (scheme !== "skills-sh" && scheme !== "well-known" && scheme !== "github") {
+		if (
+			scheme !== "skills-sh" &&
+			scheme !== "well-known" &&
+			scheme !== "github" &&
+			scheme !== "claude"
+		) {
 			return yield* new UnsupportedScheme({ scheme })
 		}
 
