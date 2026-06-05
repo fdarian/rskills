@@ -456,7 +456,10 @@ export const SkillsShSource: SkillSource = {
 			)
 	}),
 
-	read: Effect.fn("SkillsShSource.read")(function* (uri: ParsedUri) {
+	read: Effect.fn("SkillsShSource.read")(function* (
+		uri: ParsedUri,
+		_options?: import("./source.js").SkillReadOptions,
+	) {
 		const segments = uri.identifier.split("/")
 		if (segments.length < 3) {
 			return yield* new NotFound({

@@ -86,7 +86,10 @@ function buildContentsPath(uri: ParsedUri): { owner: string; repo: string; conte
 export const GitHubSource: SkillSource = {
 	scheme: "github",
 
-	read: Effect.fn("GitHubSource.read")(function* (uri: ParsedUri) {
+	read: Effect.fn("GitHubSource.read")(function* (
+		uri: ParsedUri,
+		_options?: import("./source.js").SkillReadOptions,
+	) {
 		const segments = uri.identifier.split("/")
 		if (segments.length < 3) {
 			return yield* new NotFound({

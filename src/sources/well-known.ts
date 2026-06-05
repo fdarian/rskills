@@ -116,7 +116,10 @@ function fetchText(url: string) {
 export const WellKnownSource: SkillSource = {
 	scheme: "well-known",
 
-	read: Effect.fn("WellKnownSource.read")(function* (uri: ParsedUri) {
+	read: Effect.fn("WellKnownSource.read")(function* (
+		uri: ParsedUri,
+		_options?: import("./source.js").SkillReadOptions,
+	) {
 		const baseUrl = buildBaseUrl(uri.identifier)
 		const skillName = getLastSegment(uri.identifier)
 		const index = yield* fetchIndex(baseUrl)
