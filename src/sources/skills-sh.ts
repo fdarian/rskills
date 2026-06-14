@@ -20,6 +20,11 @@ type GitHubContentsItem = {
 	type: "file" | "dir" | "symlink" | "submodule"
 }
 
+type GitHubRawCandidate = {
+	baseUrl: string
+	prefix: string
+}
+
 function fetchGitHubContents(
 	owner: string,
 	repo: string,
@@ -80,6 +85,93 @@ function fetchGitHubContents(
  * Step 1: Probe the four candidate GitHub raw roots to find where a skills-sh
  * skill lives. Returns a BaseUrl root if found, or null if all 404.
  */
+function createGitHubRawCandidates(
+	owner: string,
+	repo: string,
+	skillPath: string,
+): ReadonlyArray<GitHubRawCandidate> {
+	const rawBaseUrl = `https://raw.githubusercontent.com/${owner}/${repo}/HEAD`
+	return [
+		{
+			baseUrl: `${rawBaseUrl}/${skillPath}`,
+			prefix: "",
+		},
+		{
+			baseUrl: `${rawBaseUrl}/skills/${skillPath}`,
+			prefix: "skills",
+		},
+		{
+			baseUrl: `${rawBaseUrl}/.agents/skills/${skillPath}`,
+			prefix: ".agents/skills",
+		},
+		{
+			baseUrl: `${rawBaseUrl}/.claude/skills/${skillPath}`,
+			prefix: ".claude/skills",
+		},
+	]
+}
+
+function isValidSymlinkTarget(text: string): boolean {
+	if (text.length === 0) {
+		return false
+	}
+
+	if (text.includes("\r")) {
+		return false
+	}
+
+	const lines = text.split("\n")
+	if (lines.length > 2) {
+		return false
+	}
+
+	if (lines.length === 2 && lines[1] !== "") {
+		return false
+	}
+
+	return !text.includes("://")
+}
+
+const fetchRawText = Effect.fn("fetchRawText")(
+	(url: string): Effect.Effect<string | null, FetchFailed, HttpClient.HttpClient> =>
+		Effect.gen(function* () {
+			const client = yield* HttpClient.HttpClient
+			const response = yield* client.get(url).pipe(
+				Effect.timeout(Duration.seconds(20)),
+				Effect.catchAll(
+					(error) =>
+						new FetchFailed({
+							message: `Failed to fetch ${url}`,
+							cause: error,
+						}),
+				),
+			)
+
+			if (response.status === 404) {
+				return null
+			}
+
+			if (response.status !== 200) {
+				return yield* new FetchFailed({
+					message: `Failed to fetch ${url}: HTTP ${response.status}`,
+					cause: response,
+				})
+			}
+
+			const text = yield* response.text.pipe(
+				Effect.catchAll(
+					(error) =>
+						new FetchFailed({
+							message: `Failed to read response body from ${url}`,
+							cause: error,
+						}),
+				),
+			)
+
+			return text
+		}),
+)
+
 const tryGitHubRawProbe = Effect.fn("tryGitHubRawProbe")(
 	(
 		owner: string,
@@ -87,40 +179,43 @@ const tryGitHubRawProbe = Effect.fn("tryGitHubRawProbe")(
 		skillPath: string,
 	): Effect.Effect<BaseUrlSkillRoot | null, FetchFailed, HttpClient.HttpClient> =>
 		Effect.gen(function* () {
-			const candidates = [
-				`https://raw.githubusercontent.com/${owner}/${repo}/HEAD/${skillPath}`,
-				`https://raw.githubusercontent.com/${owner}/${repo}/HEAD/skills/${skillPath}`,
-				`https://raw.githubusercontent.com/${owner}/${repo}/HEAD/.agents/skills/${skillPath}`,
-				`https://raw.githubusercontent.com/${owner}/${repo}/HEAD/.claude/skills/${skillPath}`,
-			]
-
-			const client = yield* HttpClient.HttpClient
-
+			const candidates = createGitHubRawCandidates(owner, repo, skillPath)
 			for (const candidate of candidates) {
-				const probeUrl = `${candidate}/SKILL.md`
-				const response = yield* client.get(probeUrl).pipe(
-					Effect.timeout(Duration.seconds(20)),
-					Effect.catchAll(
-						(error) =>
-							new FetchFailed({
-								message: `Failed to probe ${probeUrl}`,
-								cause: error,
-							}),
-					),
-				)
-
-				if (response.status === 200) {
-					return { _tag: "BaseUrl" as const, baseUrl: candidate }
-				}
-
-				if (response.status === 404) {
+				const probeUrl = `${candidate.baseUrl}/SKILL.md`
+				const probeResult = yield* fetchRawText(probeUrl)
+				if (probeResult === null) {
 					continue
 				}
 
-				return yield* new FetchFailed({
-					message: `Failed to probe ${probeUrl}: HTTP ${response.status}`,
-					cause: response,
-				})
+				return { _tag: "BaseUrl" as const, baseUrl: candidate.baseUrl }
+			}
+
+			const rawBaseUrl = `https://raw.githubusercontent.com/${owner}/${repo}/HEAD`
+
+			for (const candidate of candidates) {
+				if (candidate.prefix.length === 0) {
+					continue
+				}
+
+				const symlinkProbeUrl = `${rawBaseUrl}/${candidate.prefix}`
+				const symlinkTarget = yield* fetchRawText(symlinkProbeUrl)
+				if (symlinkTarget === null) {
+					continue
+				}
+
+				const trimmedTarget = symlinkTarget.trim()
+				if (!isValidSymlinkTarget(symlinkTarget) || trimmedTarget.length === 0) {
+					continue
+				}
+
+				const resolvedBaseUrl = `${rawBaseUrl}/${trimmedTarget}/${skillPath}`
+				const resolvedProbeUrl = `${resolvedBaseUrl}/SKILL.md`
+				const resolvedResult = yield* fetchRawText(resolvedProbeUrl)
+				if (resolvedResult === null) {
+					continue
+				}
+
+				return { _tag: "BaseUrl" as const, baseUrl: resolvedBaseUrl }
 			}
 
 			return null
