@@ -111,25 +111,53 @@ function createGitHubRawCandidates(
 	]
 }
 
-function isValidSymlinkTarget(text: string): boolean {
-	if (text.length === 0) {
+function isValidSymlinkTarget(target: string): boolean {
+	if (target.length === 0) {
 		return false
 	}
 
-	if (text.includes("\r")) {
+	if (target.startsWith("/")) {
 		return false
 	}
 
-	const lines = text.split("\n")
-	if (lines.length > 2) {
+	if (target.includes("\\")) {
 		return false
 	}
 
-	if (lines.length === 2 && lines[1] !== "") {
+	if (target.includes("?")) {
 		return false
 	}
 
-	return !text.includes("://")
+	if (target.includes("#")) {
+		return false
+	}
+
+	if (target.includes("://")) {
+		return false
+	}
+
+	for (const char of target) {
+		if (/\s/u.test(char) || /\p{C}/u.test(char)) {
+			return false
+		}
+	}
+
+	const segments = target.split("/")
+	for (const segment of segments) {
+		if (segment.length === 0) {
+			return false
+		}
+
+		if (segment === "..") {
+			return false
+		}
+
+		if (!/^[\w.-]+$/u.test(segment)) {
+			return false
+		}
+	}
+
+	return true
 }
 
 const fetchRawText = Effect.fn("fetchRawText")(
@@ -204,7 +232,7 @@ const tryGitHubRawProbe = Effect.fn("tryGitHubRawProbe")(
 				}
 
 				const trimmedTarget = symlinkTarget.trim()
-				if (!isValidSymlinkTarget(symlinkTarget) || trimmedTarget.length === 0) {
+				if (!isValidSymlinkTarget(trimmedTarget)) {
 					continue
 				}
 
