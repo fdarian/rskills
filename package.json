@@ -25,6 +25,7 @@
 		"provenance": true
 	},
 	"scripts": {
+		"start": "bun run src/cli.ts",
 		"build": "bun build src/cli.ts --target=node --outfile dist/cli.js",
 		"build:binaries": "bun run scripts/build-binaries.ts",
 		"prepack": "bun run build",

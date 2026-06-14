@@ -38,14 +38,9 @@ export function parse(
 		}
 
 		const schemeSeparatorIndex = uriString.indexOf("://")
-		if (schemeSeparatorIndex === -1) {
-			return yield* new ParseFailed({
-				message: `Invalid URI: missing :// separator in "${uriString}"`,
-			})
-		}
-
-		const scheme = uriString.slice(0, schemeSeparatorIndex)
-		const rest = uriString.slice(schemeSeparatorIndex + 3)
+		const scheme =
+			schemeSeparatorIndex === -1 ? "skills-sh" : uriString.slice(0, schemeSeparatorIndex)
+		const rest = schemeSeparatorIndex === -1 ? uriString : uriString.slice(schemeSeparatorIndex + 3)
 
 		if (
 			scheme !== "skills-sh" &&
