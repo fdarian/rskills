@@ -2,16 +2,12 @@ import { homedir } from "node:os"
 import { Command, CommandExecutor, FileSystem, Path } from "@effect/platform"
 import { Effect } from "effect"
 import { FetchFailed } from "#/errors.js"
+import { parseFrontmatter } from "#/frontmatter.js"
 import type { SkillReadOptions } from "./source.js"
 
 export type ClaudeShell = "bash" | "powershell"
 
 export const shellExecutionDisabledMessage = "[shell command execution disabled by policy]"
-
-interface FrontmatterParse {
-	readonly body: string
-	readonly shell: ClaudeShell
-}
 
 interface PlaceholderSpan {
 	readonly start: number
@@ -49,20 +45,6 @@ function parseShellFromFrontmatterYaml(yaml: string): ClaudeShell {
 		}
 	}
 	return "bash"
-}
-
-export function stripFrontmatter(content: string): FrontmatterParse {
-	if (!content.startsWith("---\n")) {
-		return { body: content, shell: "bash" }
-	}
-	const closeIndex = content.indexOf("\n---\n", 4)
-	if (closeIndex === -1) {
-		return { body: content, shell: "bash" }
-	}
-	const yamlBlock = content.slice(4, closeIndex)
-	const body = content.slice(closeIndex + 5)
-	const shell = parseShellFromFrontmatterYaml(yamlBlock)
-	return { body, shell }
 }
 
 function findInlinePlaceholder(body: string, searchFrom: number): PlaceholderSpan | null {
@@ -219,24 +201,26 @@ export const preprocessClaudeSkillContent = Effect.fn(
 	if (options?.raw === true) {
 		return content
 	}
-	const stripped = stripFrontmatter(content)
+	const parsed = parseFrontmatter(content)
+	const shell =
+		parsed.frontmatter === null ? "bash" : parseShellFromFrontmatterYaml(parsed.frontmatter)
 	const disabled = yield* isShellExecutionDisabled()
-	const spans = collectPlaceholders(stripped.body)
+	const spans = collectPlaceholders(parsed.body)
 	if (spans.length === 0) {
-		return stripped.body
+		return parsed.body
 	}
 	let result = ""
 	let cursor = 0
 	for (const span of spans) {
-		result += stripped.body.slice(cursor, span.start)
+		result += parsed.body.slice(cursor, span.start)
 		if (disabled) {
 			result += shellExecutionDisabledMessage
 		} else {
-			const output = yield* runShellScript(stripped.shell, span.command)
+			const output = yield* runShellScript(shell, span.command)
 			result += output
 		}
 		cursor = span.end
 	}
-	result += stripped.body.slice(cursor)
+	result += parsed.body.slice(cursor)
 	return result
 })
