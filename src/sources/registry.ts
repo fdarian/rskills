@@ -1,5 +1,6 @@
 import type { CommandExecutor, FileSystem, HttpClient, Path } from "@effect/platform"
 import { Console, Effect } from "effect"
+import { stripFrontmatter } from "#/frontmatter.js"
 import {
 	type FetchFailed,
 	type InvalidArgument,
@@ -58,7 +59,11 @@ export function readFromUri(
 > {
 	return Effect.gen(function* () {
 		const source = yield* resolveSource(uri.scheme)
-		return yield* source.read(uri, options)
+		const content = yield* source.read(uri, options)
+		if (options?.raw === true) {
+			return content
+		}
+		return stripFrontmatter(content)
 	})
 }
 
