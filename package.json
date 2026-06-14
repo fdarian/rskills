@@ -29,9 +29,10 @@
 		"build": "bun build src/cli.ts --target=node --outfile dist/cli.js",
 		"build:binaries": "bun run scripts/build-binaries.ts",
 		"prepack": "bun run build",
-		"typecheck": "tsc --noEmit",
+		"check:type": "tsc --noEmit",
 		"format": "biome check --write .",
-		"lint": "biome check .",
+		"check:lint": "biome check .",
+		"check": "bun run check:type && bun run check:lint",
 		"ci:version": "changeset version",
 		"ci:release": "changeset publish"
 	},

@@ -147,12 +147,15 @@ The runtime layer in `src/cli.ts` is `Layer.mergeAll(FetchHttpClient.layer, Skil
 
 ```bash
 bun install
-bun run typecheck    # tsc --noEmit
-bunx biome check .   # lint + format
+bun run check:type   # tsc --noEmit
+bun run check:lint   # biome check .
+bun run check        # CI baseline: type + lint
 bun run build        # bundle to single node-runnable dist/cli.js
 bun run build:binaries  # compile standalone executables (--compile --bytecode) for darwin/linux
 bun run src/cli.ts read github://anthropics/skills/skills/pdf
 ```
+
+CI runs `.github/workflows/check.yml`: format-and-commit first, then `bun run check`.
 
 ## Incur quirks
 
