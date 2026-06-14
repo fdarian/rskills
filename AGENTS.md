@@ -51,13 +51,15 @@ Resolve `<skill-name>` against Claude Code skill roots in order; first existing 
 
 `read` (and the `list`-supporting `resolveSkillsShRoot`) runs a 3-step cascade to locate a skill's SKILL.md:
 
-### Step 1 — GitHub raw probe (existing)
+### Step 1 — GitHub raw probe
 
 Probes 4 candidate raw roots in order:
 - `https://raw.githubusercontent.com/{owner}/{repo}/HEAD/{skillPath}/SKILL.md`
 - `…/skills/{skillPath}/SKILL.md`
 - `…/.agents/skills/{skillPath}/SKILL.md`
 - `…/.claude/skills/{skillPath}/SKILL.md`
+
+If all 4 return 404, probe the bare prefix blobs for `skills`, `.agents/skills`, and `.claude/skills`. A 200 raw response there is treated as a Git symlink target (guarded to a single-line path), then `/{target}/{skillPath}/SKILL.md` is probed. This handles repos where the public skills root is a symlink.
 
 First 200 → resolved root cached as `{ _tag: "BaseUrl"; baseUrl: string }`. Subsequent reads append `/<subpathOrSKILL.md>`.
 
