@@ -12,12 +12,13 @@ import {
 } from "#/sources/registry.js"
 import { SkillsShCacheLive } from "#/sources/skills-sh-cache.js"
 import { parse } from "#/uri.js"
+import packageJson from "../package.json" with { type: "json" }
 
 const runtimeLayer = Layer.mergeAll(FetchHttpClient.layer, SkillsShCacheLive, NodeContext.layer)
 
 const cli = Cli.create("rskills", {
-	description: "Read remote Anthropic-style skills without installing them",
-	version: "0.1.0",
+	description: packageJson.description,
+	version: packageJson.version,
 })
 
 cli.command("read", {
