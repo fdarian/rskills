@@ -24,7 +24,9 @@ const cli = Cli.create("rskills", {
 cli.command("read", {
 	description: "Fetch a skill file and print to stdout",
 	args: z.object({
-		uri: z.string().describe("URI to read (e.g. github://owner/repo/path or https://...)"),
+		uri: z
+			.string()
+			.describe("URI to read (e.g. owner/repo/skill, github://owner/repo/path, or https://...)"),
 	}),
 	options: z.object({
 		raw: z
@@ -107,7 +109,11 @@ cli.command("search", {
 cli.command("ls", {
 	description: "List entries in a skill directory",
 	args: z.object({
-		uri: z.string().describe("URI to list (e.g. github://owner/repo/path or skills-sh://...)"),
+		uri: z
+			.string()
+			.describe(
+				"URI to list (e.g. owner/repo/skill, github://owner/repo/path, or skills-sh://...)",
+			),
 	}),
 	output: z.object({
 		entries: z.array(

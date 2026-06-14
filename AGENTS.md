@@ -10,7 +10,7 @@ A Bun + Effect.ts CLI for reading remote Anthropic-style skills without installi
 
 ## URI scheme
 
-`<source>://<identifier>[/<subpath>]`
+`<source>://<identifier>[/<subpath>]` — `<source>://` is optional; bare identifiers default to `skills-sh://`.
 
 | Source | Identifier | Search? | Read? | List? |
 |---|---|---|---|---|
