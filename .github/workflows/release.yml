@@ -1,0 +1,144 @@
+name: Release
+
+on:
+  push:
+    branches:
+      - main
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+  pull-requests: write
+  id-token: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+
+      - name: Setup Node
+        uses: actions/setup-node@v6
+        with:
+          node-version: '24'
+          registry-url: 'https://registry.npmjs.org'
+          package-manager-cache: false
+
+      - name: Update npm
+        run: npm install -g npm@latest
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Release
+        id: changesets
+        uses: changesets/action@v1
+        with:
+          version: bun run ci:version
+          publish: bun run ci:release
+          createGithubReleases: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Derive release metadata
+        if: steps.changesets.outputs.published == 'true'
+        run: |
+          VERSION="${{ fromJSON(steps.changesets.outputs.publishedPackages)[0].version }}"
+          TAG="rskills-cli@${VERSION}"
+          ENCODED_TAG="${TAG//@/%40}"
+          printf 'TAG=%s\n' "$TAG" >> "$GITHUB_ENV"
+          printf 'VERSION=%s\n' "$VERSION" >> "$GITHUB_ENV"
+          printf 'ENCODED_TAG=%s\n' "$ENCODED_TAG" >> "$GITHUB_ENV"
+
+      - name: Build binaries
+        if: steps.changesets.outputs.published == 'true'
+        run: bun run build:binaries
+
+      - name: Package release archives
+        if: steps.changesets.outputs.published == 'true'
+        run: |
+          mkdir -p dist/releases
+          for target in darwin-arm64 darwin-x64 linux-x64 linux-arm64; do
+            cp "dist/bin/rskills-$target" "dist/releases/rskills"
+            chmod +x "dist/releases/rskills"
+            tar -C dist/releases -czf "dist/releases/rskills-$target.tar.gz" rskills
+            rm "dist/releases/rskills"
+            sha256sum "dist/releases/rskills-$target.tar.gz" | awk '{print $1}' > "dist/releases/rskills-$target.sha256"
+          done
+
+      - name: Upload release assets
+        if: steps.changesets.outputs.published == 'true'
+        run: gh release upload "$TAG" dist/releases/*.tar.gz --clobber
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Checkout Homebrew tap
+        if: steps.changesets.outputs.published == 'true'
+        uses: actions/checkout@v4
+        with:
+          repository: fdarian/homebrew-tap
+          token: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+          path: homebrew-tap
+
+      - name: Update Homebrew formula
+        if: steps.changesets.outputs.published == 'true'
+        run: |
+          DARWIN_ARM64_SHA="$(cat dist/releases/rskills-darwin-arm64.sha256)"
+          DARWIN_X64_SHA="$(cat dist/releases/rskills-darwin-x64.sha256)"
+          LINUX_X64_SHA="$(cat dist/releases/rskills-linux-x64.sha256)"
+          LINUX_ARM64_SHA="$(cat dist/releases/rskills-linux-arm64.sha256)"
+          cat <<EOF > homebrew-tap/Formula/rskills.rb
+          class Rskills < Formula
+            desc "Read remote Anthropic-style skills without installing them"
+            homepage "https://github.com/fdarian/rskills"
+            version "${VERSION}"
+            license "Apache-2.0"
+
+            on_macos do
+              if Hardware::CPU.arm?
+                url "https://github.com/fdarian/rskills/releases/download/${ENCODED_TAG}/rskills-darwin-arm64.tar.gz"
+                sha256 "${DARWIN_ARM64_SHA}"
+              else
+                url "https://github.com/fdarian/rskills/releases/download/${ENCODED_TAG}/rskills-darwin-x64.tar.gz"
+                sha256 "${DARWIN_X64_SHA}"
+              end
+            end
+
+            on_linux do
+              if Hardware::CPU.arm?
+                url "https://github.com/fdarian/rskills/releases/download/${ENCODED_TAG}/rskills-linux-arm64.tar.gz"
+                sha256 "${LINUX_ARM64_SHA}"
+              else
+                url "https://github.com/fdarian/rskills/releases/download/${ENCODED_TAG}/rskills-linux-x64.tar.gz"
+                sha256 "${LINUX_X64_SHA}"
+              end
+            end
+
+            def install
+              bin.install "rskills"
+            end
+
+            test do
+              system "#{bin}/rskills", "--help"
+            end
+          end
+          EOF
+
+      - name: Commit and push formula
+        if: steps.changesets.outputs.published == 'true'
+        run: |
+          cd homebrew-tap
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add Formula/rskills.rb
+          git commit -m "Update rskills formula to ${VERSION}" || exit 0
+          git push

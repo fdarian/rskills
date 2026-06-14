@@ -1,27 +1,47 @@
 {
-	"name": "rskills",
+	"name": "rskills-cli",
 	"version": "0.1.0",
 	"description": "Read remote Anthropic-style skills without installing them",
 	"type": "module",
 	"license": "Apache-2.0",
 	"bin": {
-		"rskills": "./src/cli.ts"
+		"rskills": "./dist/cli.js"
+	},
+	"files": [
+		"dist",
+		"README.md",
+		"LICENSE"
+	],
+	"repository": {
+		"type": "git",
+		"url": "git+https://github.com/fdarian/rskills.git"
+	},
+	"bugs": {
+		"url": "https://github.com/fdarian/rskills/issues"
+	},
+	"homepage": "https://github.com/fdarian/rskills#readme",
+	"publishConfig": {
+		"access": "public",
+		"provenance": true
 	},
 	"scripts": {
-		"build": "bun build src/cli.ts --outdir dist --target=bun",
+		"build": "bun build src/cli.ts --target=node --outfile dist/cli.js",
+		"build:binaries": "bun run scripts/build-binaries.ts",
+		"prepack": "bun run build",
 		"typecheck": "tsc --noEmit",
 		"format": "biome check --write .",
-		"lint": "biome check ."
-	},
-	"dependencies": {
-		"@effect/platform": "latest",
-		"@effect/platform-bun": "^0.90.0",
-		"effect": "latest",
-		"incur": "^0.4.7"
+		"lint": "biome check .",
+		"ci:version": "changeset version",
+		"ci:release": "changeset publish"
 	},
 	"devDependencies": {
 		"@biomejs/biome": "latest",
+		"@changesets/cli": "^2.31.0",
+		"@effect/platform": "^0.96.1",
+		"@effect/platform-node": "^0.107.0",
 		"@types/bun": "latest",
+		"effect": "^3.21.3",
+		"incur": "^0.4.8",
 		"typescript": "latest"
 	},
 	"packageManager": "bun@1.1.0"

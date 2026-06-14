@@ -32,7 +32,7 @@ The boundary between `identifier` and `subpath` is detected heuristically in `sr
 
 ## claude local resolution
 
-First non-HTTP source — reads via `@effect/platform` `FileSystem` + `Path` (Bun layers in `cli.ts`), not `HttpClient`.
+First non-HTTP source — reads via `@effect/platform` `FileSystem` + `Path` (Node layers in `cli.ts`), not `HttpClient`.
 
 Resolve `<skill-name>` against Claude Code skill roots in order; first existing path wins:
 
@@ -122,16 +122,18 @@ To add a new source:
 2. Export a `SkillSource` object
 3. Register it in `src/sources/registry.ts` (`allSources` array)
 
-The runtime layer in `src/cli.ts` is `Layer.mergeAll(FetchHttpClient.layer, SkillsShCacheLive, BunContext.layer)` — HTTP sources use `FetchHttpClient`; `claude` uses `BunContext` for `FileSystem` + `Path`. Merge additional services there as needed.
+The runtime layer in `src/cli.ts` is `Layer.mergeAll(FetchHttpClient.layer, SkillsShCacheLive, NodeContext.layer)` — HTTP sources use `FetchHttpClient`; `claude` uses `NodeContext` from `@effect/platform-node` for `FileSystem` + `Path`. Merge additional services there as needed.
 
 ## Stack
 
 - **Bun** — runtime + package manager (`packageManager: bun@1.1.0`)
 - **incur** — CLI surface (zod schemas, structured output, TOON default). [Notes on incur](#incur-quirks) below.
 - **Effect.ts** — services, tagged errors, runtime composition
+- **`@effect/platform-node`** — portable Node runtime services (`NodeContext`) for filesystem, path, and command execution
 - **`@effect/platform` `HttpClient`** — all HTTP goes through this
 - **Biome** — format + lint
 - **TypeScript strict**, path alias `#/*` → `src/*`
+- **Published artifact** — single bundled `dist/cli.js` that runs under Node; npm ships `dist/`, and runtime libraries are build-time `devDependencies` because Bun bundles them into the output
 
 ## Coding principles
 
@@ -147,7 +149,8 @@ The runtime layer in `src/cli.ts` is `Layer.mergeAll(FetchHttpClient.layer, Skil
 bun install
 bun run typecheck    # tsc --noEmit
 bunx biome check .   # lint + format
-bun run build        # bun build --target=bun (REQUIRED — default browser target fails on `node:os`)
+bun run build        # bundle to single node-runnable dist/cli.js
+bun run build:binaries  # compile standalone executables (--compile --bytecode) for darwin/linux
 bun run src/cli.ts read github://anthropics/skills/skills/pdf
 ```
 
@@ -158,4 +161,4 @@ Things that aren't obvious from incur's README:
 - **`read` returns `z.string()`, not `z.object({...})`.** Scalar return values pass through every `--format` (md, toon, default) as raw text. Object returns get rendered as a key-value markdown table for `--format md`, which HTML-escapes content. If you ever wrap `read`'s output in an envelope, you'll break agent ergonomics.
 - **Commands must be defined inline** in `cli.command('name', { ... })`. If you extract a command def to a const, TypeScript can't infer `c.args`/`c.options` types backwards through incur's generics — `c` becomes `any`. This is why everything lives in `src/cli.ts`.
 - **`cli.serve()` argv handling is fragile.** When run via `bun src/cli.ts <args>`, `process.argv.slice(2)` starts with `src/cli.ts`, which incur interprets as a runtime/script token. The CLI manually strips `*.ts`/`*.js` from `argv[0]` before passing to `serve()` — see the comment at the bottom of `cli.ts`.
-- **Build target.** Bun's bundler defaults to `browser`, which trips on `node:os` imports from incur. The `build` script has `--target=bun` for this reason.
+- **Build target.** Bun's bundler defaults to `browser`, which trips on `node:os` imports from incur. The `build` script uses `--target=node` so Node builtins stay external for the bundled `dist/cli.js`, and `build:binaries` uses `--target=bun-<os>-<arch>` for the standalone executables.

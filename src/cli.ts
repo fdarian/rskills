@@ -1,6 +1,6 @@
-#!/usr/bin/env bun
+#!/usr/bin/env node
 import { FetchHttpClient } from "@effect/platform"
-import { BunContext } from "@effect/platform-bun"
+import { NodeContext } from "@effect/platform-node"
 import { Effect, Layer } from "effect"
 import { Cli, z } from "incur"
 import {
@@ -13,7 +13,7 @@ import {
 import { SkillsShCacheLive } from "#/sources/skills-sh-cache.js"
 import { parse } from "#/uri.js"
 
-const runtimeLayer = Layer.mergeAll(FetchHttpClient.layer, SkillsShCacheLive, BunContext.layer)
+const runtimeLayer = Layer.mergeAll(FetchHttpClient.layer, SkillsShCacheLive, NodeContext.layer)
 
 const cli = Cli.create("rskills", {
 	description: "Read remote Anthropic-style skills without installing them",
