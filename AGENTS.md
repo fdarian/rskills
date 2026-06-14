@@ -1,6 +1,6 @@
 # rskills
 
-A Bun + Effect.ts CLI for reading remote Anthropic-style skills without installing them. Built on [incur](https://github.com/wevm/incur) for the CLI surface.
+A Bun + Effect.ts CLI for reading remote [skills](https://agentskills.io/) without installing them. Built on [incur](https://github.com/wevm/incur) for the CLI surface.
 
 ## What it does
 

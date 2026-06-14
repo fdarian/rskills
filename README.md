@@ -1,13 +1,13 @@
 # rskills
 
-Read remote Anthropic-style skills (`SKILL.md` + `references/` / `scripts/` / `templates/` / `assets/`) without installing them. Built for AI agents that need to peek at a skill before deciding to install.
+Read remote [skills](https://agentskills.io/) (`SKILL.md` + `references/` / `scripts/` / `templates/` / `assets/`) without installing them. Built for AI agents that need to peek at a skill before deciding to install.
 
 ## Install
 
 ```bash
-bun install -g rskills
-# or one-shot:
-bunx rskills <command>
+brew install fdarian/tap/rskills
+# or one-shot, no install:
+npx rskills-cli <command>
 ```
 
 ## Usage
