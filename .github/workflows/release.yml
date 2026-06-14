@@ -77,7 +77,9 @@ jobs:
 
       - name: Upload release assets
         if: steps.changesets.outputs.published == 'true'
-        run: gh release upload "$TAG" dist/releases/*.tar.gz --clobber
+        run: |
+          gh release view "$TAG" >/dev/null 2>&1 || gh release create "$TAG" --title "$TAG" --notes "Release $VERSION"
+          gh release upload "$TAG" dist/releases/*.tar.gz --clobber
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
@@ -92,6 +94,7 @@ jobs:
       - name: Update Homebrew formula
         if: steps.changesets.outputs.published == 'true'
         run: |
+          mkdir -p homebrew-tap/Formula
           DARWIN_ARM64_SHA="$(cat dist/releases/rskills-darwin-arm64.sha256)"
           DARWIN_X64_SHA="$(cat dist/releases/rskills-darwin-x64.sha256)"
           LINUX_X64_SHA="$(cat dist/releases/rskills-linux-x64.sha256)"
