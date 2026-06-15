@@ -1,8 +1,7 @@
 #!/usr/bin/env node
-import { FetchHttpClient } from "@effect/platform"
-import { NodeContext } from "@effect/platform-node"
-import { Effect, Layer } from "effect"
+import { Effect } from "effect"
 import { Cli, z } from "incur"
+import { runtimeLayer } from "#/runtime-layer.js"
 import {
 	listFromUri,
 	looksLikeUrl,
@@ -10,11 +9,9 @@ import {
 	resolveSource,
 	searchAll,
 } from "#/sources/registry.js"
-import { SkillsShCacheLive } from "#/sources/skills-sh-cache.js"
+import { runSearchPicker } from "#/tui/search-picker.js"
 import { parse } from "#/uri.js"
 import packageJson from "../package.json" with { type: "json" }
-
-const runtimeLayer = Layer.mergeAll(FetchHttpClient.layer, SkillsShCacheLive, NodeContext.layer)
 
 const cli = Cli.create("rskills", {
 	description: packageJson.description,
@@ -55,7 +52,7 @@ cli.command("read", {
 cli.command("search", {
 	description: "Search skills across sources",
 	args: z.object({
-		query: z.string().describe("Search query"),
+		query: z.string().optional().describe("Search query"),
 	}),
 	options: z.object({
 		source: z.string().optional().describe("Source name"),
@@ -75,6 +72,26 @@ cli.command("search", {
 		const query = c.args.query
 		const limit = c.options.limit
 		const sourceName = c.options.source
+
+		const formatRequested =
+			c.formatExplicit === true ||
+			process.argv.some(
+				(arg) => arg === "--json" || arg === "--format" || arg.startsWith("--format="),
+			)
+		const interactive =
+			process.stdin.isTTY === true &&
+			process.stdout.isTTY === true &&
+			sourceName === undefined &&
+			!formatRequested
+
+		if (interactive) {
+			await runSearchPicker({ initialQuery: query ?? "", limit })
+			process.exit(0)
+		}
+
+		if (query === undefined) {
+			throw new Error("search requires a query, e.g. `rskills search <query>`")
+		}
 
 		const effect = Effect.gen(function* () {
 			let results: Array<import("#/sources/source.js").SkillSearchResult>
