@@ -320,7 +320,7 @@ const tryUnpkgFallback = Effect.fn("tryUnpkgFallback")(
  * HTML, not embedded as raw markdown. Only the install command can be reliably
  * extracted; raw SKILL.md content cannot be recovered from this page.
  */
-const extractInstallCommand = Effect.fn("extractInstallCommand")(
+export const extractInstallCommand = Effect.fn("extractInstallCommand")(
 	(
 		owner: string,
 		repo: string,
