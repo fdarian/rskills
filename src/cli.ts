@@ -33,7 +33,7 @@ cli.command("read", {
 			.boolean()
 			.optional()
 			.describe(
-				"Return literal file bytes for claude:// (no frontmatter strip, no !` shell execution)",
+				"Return literal file content with no frontmatter stripped (for claude://, also skips !` shell execution)",
 			),
 	}),
 	output: z.string(),

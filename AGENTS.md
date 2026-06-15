@@ -4,7 +4,7 @@ A Bun + Effect.ts CLI for reading remote [skills](https://agentskills.io/) witho
 
 ## What it does
 
-- `rskills read <uri>` — fetch a skill file and print **raw markdown** to stdout (no envelope, in any `--format`). Reading a directory URI exits non-zero with an `IsDirectory` message pointing to `rskills ls`.
+- `rskills read <uri>` — fetch a skill file and print markdown body content to stdout (frontmatter stripped by default; `--raw` returns the literal file, no envelope, in any `--format`). Reading a directory URI exits non-zero with an `IsDirectory` message pointing to `rskills ls`.
 - `rskills ls <uri>` — list entries in a skill directory; returns structured `{ entries: [{ name, type }] }` (mirrors Anthropic's `ls`/`Glob` tools — `read` is files-only, `ls` is directories)
 - `rskills search <query> [--source <name>] [--limit <n>]` — search skills; returns structured TOON by default, switchable via `--format json|yaml|md|jsonl`
 
@@ -41,9 +41,10 @@ Resolve `<skill-name>` against Claude Code skill roots in order; first existing 
 
 `NotFound` lists probed absolute paths. Plugin roots (`~/.claude/plugins/**/skills/`) and `claude://user/<name>` are deferred (see comment in `src/sources/claude.ts`).
 
-**Post-read processing** (`src/sources/claude-preprocess.ts`, default-on; `read --raw` skips):
+**Post-read processing**:
 
-- Strip YAML frontmatter (`---` … `---`); `shell` field selects `bash` (default) or `powershell` for inline execution.
+- YAML frontmatter stripping is global for all sources in `readFromUri` (`src/frontmatter.ts`); `read --raw` skips it and returns the literal file content.
+- `claude://` additionally preprocesses inline shell placeholders in `src/sources/claude-preprocess.ts`; its `shell` frontmatter field selects `bash` (default) or `powershell` for execution.
 - Execute inline `` !`cmd` `` (only when `!` is line-start or whitespace-prefixed; `KEY=!`cmd`` stays literal) and fenced ` ```! ` blocks; substitute stdout once (no re-scan). Non-zero exit still substitutes stdout.
 - Honor `disableSkillShellExecution: true` in `<cwd>/.claude/settings.json` or `~/.claude/settings.json` — commands become `[shell command execution disabled by policy]`.
 
