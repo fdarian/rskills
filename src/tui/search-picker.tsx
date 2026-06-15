@@ -359,10 +359,16 @@ function SearchBody(props: SearchBodyProps) {
 		return <Text color="red">{`  ${props.errorMessage}`}</Text>
 	}
 	if (props.results.length > 0) {
+		const skillsColumnWidth = Math.max(
+			"  Skills".length,
+			...props.results.map(
+				(result) => `  ${result.name} ${deriveSource(result.identifier)}`.length,
+			),
+		)
 		return (
 			<Box flexDirection="column">
 				<Box>
-					<Box flexGrow={1}>
+					<Box width={skillsColumnWidth}>
 						<Text dimColor>{"  Skills"}</Text>
 					</Box>
 					<Box marginLeft={2}>
@@ -374,6 +380,7 @@ function SearchBody(props: SearchBodyProps) {
 						key={result.identifier}
 						result={result}
 						selected={index === props.selectedIndex}
+						columnWidth={skillsColumnWidth}
 					/>
 				))}
 			</Box>
@@ -388,14 +395,18 @@ function SearchBody(props: SearchBodyProps) {
 	return <Text dimColor>{"  No matches"}</Text>
 }
 
-function ResultRow(props: { readonly result: SkillSearchResult; readonly selected: boolean }) {
+function ResultRow(props: {
+	readonly result: SkillSearchResult
+	readonly selected: boolean
+	readonly columnWidth: number
+}) {
 	const source = deriveSource(props.result.identifier)
 	const installs =
 		props.result.installs !== undefined ? humanizeInstalls(props.result.installs) : "—"
 	const prefix = props.selected ? "❯ " : "  "
 	return (
 		<Box>
-			<Box flexGrow={1}>
+			<Box width={props.columnWidth}>
 				<Text {...(props.selected ? { color: "cyan" as const } : {})}>
 					{`${prefix}${props.result.name}`}
 				</Text>
