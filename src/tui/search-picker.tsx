@@ -15,10 +15,10 @@ type PickerOutcome = { readonly kind: "quit" } | { readonly kind: "read"; readon
 type SearchStatus = "idle" | "loading" | "ready" | "error"
 
 const ACTIONS = [
-	{ key: "read", label: "read SKILL.md" },
-	{ key: "copy-id", label: "copy identifier" },
-	{ key: "copy-install", label: "copy install command" },
-	{ key: "open", label: "open on skills.sh" },
+	{ key: "read", label: "Read SKILL.md" },
+	{ key: "copy-id", label: "Copy identifier" },
+	{ key: "copy-install", label: "Copy install command" },
+	{ key: "open", label: "Open on skills.sh" },
 ] as const
 
 type ActionKey = (typeof ACTIONS)[number]["key"]
