@@ -341,9 +341,7 @@ function SearchScreen(props: SearchScreenProps) {
 				/>
 			</Box>
 			<Box marginTop={1}>
-				<Text dimColor>
-					↑↓ · enter · esc quit · {props.results.length} results
-				</Text>
+				<Text dimColor>↑↓ · enter · esc quit · {props.results.length} results</Text>
 			</Box>
 		</Box>
 	)
