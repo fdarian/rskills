@@ -6,7 +6,7 @@ A Bun + Effect.ts CLI for reading remote [skills](https://agentskills.io/) witho
 
 - `rskills read <uri>` — fetch a skill file and print **raw markdown** to stdout (no envelope, in any `--format`). Reading a directory URI exits non-zero with an `IsDirectory` message pointing to `rskills ls`.
 - `rskills ls <uri>` — list entries in a skill directory; returns structured `{ entries: [{ name, type }] }` (mirrors Anthropic's `ls`/`Glob` tools — `read` is files-only, `ls` is directories)
-- `rskills search <query> [--source <name>] [--limit <n>]` — search skills; returns structured TOON by default, switchable via `--format json|yaml|md|jsonl`
+- `rskills search [query] [--source <name>] [--limit <n>]` — search skills. On an interactive terminal (stdin + stdout both TTY, no `--source`, no `--format`/`--json`/`--token-*`), opens a live Ink picker: type to search (debounced 250 ms, race-safe via Effect fiber interruption), ↑/↓ to navigate, Enter for an action menu (read SKILL.md / copy identifier / copy install command / open on skills.sh), Esc to quit. Skills-sh only in interactive mode. Otherwise (piped, `--format`, `--source`, etc.) emits structured output — TOON by default, switchable via `--format json|yaml|md|jsonl`; `query` is required in this mode.
 
 ## URI scheme
 
@@ -119,12 +119,16 @@ interface SkillSource {
 
 `list` is optional. Sources that don't implement it (e.g. `url`) cause `rskills ls` to exit with `"Source '<scheme>' does not support listing"`. When `read` is called on a path that turns out to be a directory, it must throw `IsDirectory` with a message suggesting `rskills ls`.
 
+`SkillSearchResult` shape: `{ scheme: string; identifier: string; name: string; installs?: number }`. The CLI maps `scheme` → `source` in output, so consumers see `{ identifier, name, installs?, source }`. There is no `description` field. `installs` is a real count from the skills.sh API; well-known results omit it.
+
+The interactive live picker (`src/tui/search-picker.tsx`, using Ink/React) is skills-sh-only and launched from `src/cli.ts` when TTY conditions are met. The shared Effect runtime is extracted to `src/runtime-layer.ts` (`runtimeLayer`, `makeAppRuntime`). Ink, React, and ink-text-input are devDependencies bundled into `dist/cli.js`.
+
 To add a new source:
 1. Create `src/sources/my-source.ts`
 2. Export a `SkillSource` object
 3. Register it in `src/sources/registry.ts` (`allSources` array)
 
-The runtime layer in `src/cli.ts` is `Layer.mergeAll(FetchHttpClient.layer, SkillsShCacheLive, NodeContext.layer)` — HTTP sources use `FetchHttpClient`; `claude` uses `NodeContext` from `@effect/platform-node` for `FileSystem` + `Path`. Merge additional services there as needed.
+The runtime layer is defined in `src/runtime-layer.ts` (`runtimeLayer = Layer.mergeAll(FetchHttpClient.layer, SkillsShCacheLive, NodeContext.layer)`) — HTTP sources use `FetchHttpClient`; `claude` uses `NodeContext` from `@effect/platform-node` for `FileSystem` + `Path`. Merge additional services there as needed.
 
 ## Stack
 

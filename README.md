@@ -45,10 +45,14 @@ rskills ls claude://my-skill
 
 ### Search
 
+On an interactive terminal (no `--source`, `--format`, `--json`, or `--token-*`), `search` opens a live Ink picker: type to search, ↑/↓ to navigate, Enter for an action menu (read SKILL.md / copy identifier / copy install command / open on skills.sh), Esc to quit. Skills-sh only.
+
 ```bash
+rskills search            # open interactive picker (TTY only)
+rskills search react      # pre-fill query in picker (TTY) or emit structured output (non-TTY)
 rskills search react --source skills-sh --limit 5
 rskills search https://mintlify.com/docs --source well-known
-rskills search react --limit 5 --format json   # switch output format
+rskills search react --limit 5 --format json   # structured output, skip picker
 ```
 
 ## URI format
@@ -77,7 +81,7 @@ No subpath → fetches `SKILL.md`. With a subpath, rskills detects the boundary 
 
 - `read` prints **raw markdown** to stdout regardless of `--format`. Pipe it anywhere.
 - `ls` prints structured `{ entries: [{ name, type }] }` — TOON by default, switchable with `--format json|yaml|md|jsonl`.
-- `search` prints structured results — TOON by default, switchable with `--format json|yaml|md|jsonl`.
+- `search` opens an interactive live picker on a TTY; otherwise prints structured results (`{ identifier, name, installs?, source }`) — TOON by default, switchable with `--format json|yaml|md|jsonl`.
 - Errors exit with non-zero status and print a short message.
 - Reading a directory path with `read` exits non-zero with a message pointing to `rskills ls`.
 
