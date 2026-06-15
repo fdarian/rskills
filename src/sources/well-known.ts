@@ -170,7 +170,7 @@ export const WellKnownSource: SkillSource = {
 			(skill): SkillSearchResult => ({
 				scheme: "well-known",
 				identifier: skill.name,
-				description: skill.description || "",
+				name: skill.name,
 			}),
 		)
 

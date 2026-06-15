@@ -14,7 +14,8 @@ import type { SkillsShCache } from "./skills-sh-cache.js"
 export interface SkillSearchResult {
 	readonly scheme: string
 	readonly identifier: string
-	readonly description: string
+	readonly name: string
+	readonly installs?: number
 }
 
 export interface SkillEntry {
