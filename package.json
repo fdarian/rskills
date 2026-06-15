@@ -46,7 +46,6 @@
 		"effect": "^3.21.3",
 		"incur": "^0.4.8",
 		"ink": "^7.0.6",
-		"ink-text-input": "^6.0.0",
 		"react": "^19.2.7",
 		"typescript": "latest"
 	},

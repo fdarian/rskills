@@ -1,6 +1,5 @@
 import { Effect, Fiber } from "effect"
 import { Box, render, Text, useApp, useInput } from "ink"
-import TextInput from "ink-text-input"
 import { useEffect, useRef, useState } from "react"
 import { type AppRuntime, makeAppRuntime } from "#/runtime-layer.js"
 import { readFromUri } from "#/sources/registry.js"
@@ -33,6 +32,27 @@ function searchSkills(query: string, limit: number) {
 	})
 }
 
+/** Derive the `owner/repo` identifier from a skills-sh id (`owner/repo/skillId`). */
+function deriveSource(identifier: string) {
+	const parts = identifier.split("/").filter((segment) => segment.length > 0)
+	if (parts.length >= 2) {
+		return `${parts[0]}/${parts[1]}`
+	}
+	return identifier
+}
+
+/** Index of the previous word boundary before `position` (skips trailing spaces, then a word). */
+function wordBoundaryBefore(text: string, position: number) {
+	let index = position
+	while (index > 0 && text[index - 1] === " ") {
+		index--
+	}
+	while (index > 0 && text[index - 1] !== " ") {
+		index--
+	}
+	return index
+}
+
 type SearchPickerProps = {
 	readonly runtime: AppRuntime
 	readonly initialQuery: string
@@ -43,6 +63,7 @@ type SearchPickerProps = {
 function SearchPicker(props: SearchPickerProps) {
 	const app = useApp()
 	const [query, setQuery] = useState(props.initialQuery)
+	const [cursor, setCursor] = useState(props.initialQuery.length)
 	const [results, setResults] = useState<ReadonlyArray<SkillSearchResult>>([])
 	const [status, setStatus] = useState<SearchStatus>(
 		props.initialQuery.length > 0 ? "loading" : "idle",
@@ -100,6 +121,35 @@ function SearchPicker(props: SearchPickerProps) {
 		return () => clearTimeout(timer)
 	}, [query, props.limit, props.runtime])
 
+	const moveSelection = (delta: number) => {
+		setSelectedIndex((index) => {
+			if (results.length === 0) {
+				return 0
+			}
+			const next = index + delta
+			if (next < 0) {
+				return results.length - 1
+			}
+			if (next > results.length - 1) {
+				return 0
+			}
+			return next
+		})
+	}
+
+	const moveAction = (delta: number) => {
+		setActionIndex((index) => {
+			const next = index + delta
+			if (next < 0) {
+				return ACTIONS.length - 1
+			}
+			if (next > ACTIONS.length - 1) {
+				return 0
+			}
+			return next
+		})
+	}
+
 	const runAction = (actionKey: ActionKey) => {
 		const selected = results[selectedIndex]
 		if (selected === undefined) {
@@ -148,19 +198,19 @@ function SearchPicker(props: SearchPickerProps) {
 		props.runtime.runPromise(effect).then(setFeedback)
 	}
 
-	useInput((_input, key) => {
+	useInput((input, key) => {
 		if (screen === "actions") {
 			if (key.escape) {
 				setScreen("search")
 				setFeedback(null)
 				return
 			}
-			if (key.upArrow) {
-				setActionIndex((i) => (i > 0 ? i - 1 : ACTIONS.length - 1))
+			if (key.upArrow || (key.ctrl && input === "p")) {
+				moveAction(-1)
 				return
 			}
-			if (key.downArrow) {
-				setActionIndex((i) => (i < ACTIONS.length - 1 ? i + 1 : 0))
+			if (key.downArrow || (key.ctrl && input === "n")) {
+				moveAction(1)
 				return
 			}
 			if (key.return) {
@@ -177,12 +227,12 @@ function SearchPicker(props: SearchPickerProps) {
 			app.exit()
 			return
 		}
-		if (key.upArrow) {
-			setSelectedIndex((i) => (i > 0 ? i - 1 : Math.max(results.length - 1, 0)))
+		if (key.upArrow || (key.ctrl && input === "p")) {
+			moveSelection(-1)
 			return
 		}
-		if (key.downArrow) {
-			setSelectedIndex((i) => (results.length === 0 ? 0 : i < results.length - 1 ? i + 1 : 0))
+		if (key.downArrow || (key.ctrl && input === "n")) {
+			moveSelection(1)
 			return
 		}
 		if (key.return) {
@@ -191,6 +241,43 @@ function SearchPicker(props: SearchPickerProps) {
 				setFeedback(null)
 				setScreen("actions")
 			}
+			return
+		}
+		if (key.leftArrow) {
+			setCursor((position) => Math.max(0, position - 1))
+			return
+		}
+		if (key.rightArrow) {
+			setCursor((position) => Math.min(query.length, position + 1))
+			return
+		}
+		// delete entire line — ctrl+u (cmd+delete when the terminal maps it to ^U / 0x15)
+		if (key.ctrl && input === "u") {
+			setQuery("")
+			setCursor(0)
+			return
+		}
+		// delete previous word — opt+delete (meta+backspace) or ctrl+w
+		if ((key.meta && (key.backspace || key.delete)) || (key.ctrl && input === "w")) {
+			const start = wordBoundaryBefore(query, cursor)
+			setQuery(query.slice(0, start) + query.slice(cursor))
+			setCursor(start)
+			return
+		}
+		// delete previous char
+		if (key.backspace || key.delete) {
+			if (cursor > 0) {
+				setQuery(query.slice(0, cursor - 1) + query.slice(cursor))
+				setCursor(cursor - 1)
+			}
+			return
+		}
+		// insert printable text at the cursor
+		// biome-ignore lint/suspicious/noControlCharactersInRegex: stripping control chars from typed input is intentional
+		const printable = input.replace(/[\x00-\x1F\x7F]/g, "")
+		if (printable.length > 0 && !key.ctrl && !key.meta) {
+			setQuery(query.slice(0, cursor) + printable + query.slice(cursor))
+			setCursor(cursor + printable.length)
 		}
 	})
 
@@ -207,7 +294,7 @@ function SearchPicker(props: SearchPickerProps) {
 	return (
 		<SearchScreen
 			query={query}
-			onQueryChange={setQuery}
+			cursor={cursor}
 			results={results}
 			status={status}
 			errorMessage={errorMessage}
@@ -216,9 +303,22 @@ function SearchPicker(props: SearchPickerProps) {
 	)
 }
 
+function QueryInput(props: { readonly value: string; readonly cursor: number }) {
+	const before = props.value.slice(0, props.cursor)
+	const atCursor = props.value.slice(props.cursor, props.cursor + 1)
+	const after = props.value.slice(props.cursor + 1)
+	return (
+		<Text>
+			{before}
+			<Text inverse>{atCursor.length > 0 ? atCursor : " "}</Text>
+			{after}
+		</Text>
+	)
+}
+
 type SearchScreenProps = {
 	readonly query: string
-	readonly onQueryChange: (value: string) => void
+	readonly cursor: number
 	readonly results: ReadonlyArray<SkillSearchResult>
 	readonly status: SearchStatus
 	readonly errorMessage: string | null
@@ -230,7 +330,7 @@ function SearchScreen(props: SearchScreenProps) {
 		<Box flexDirection="column">
 			<Box>
 				<Text>{"  search › "}</Text>
-				<TextInput value={props.query} onChange={props.onQueryChange} />
+				<QueryInput value={props.query} cursor={props.cursor} />
 			</Box>
 			<Box flexDirection="column" marginTop={1}>
 				<SearchBody
@@ -241,7 +341,9 @@ function SearchScreen(props: SearchScreenProps) {
 				/>
 			</Box>
 			<Box marginTop={1}>
-				<Text dimColor>↑↓ navigate · enter · esc quit · {props.results.length} results</Text>
+				<Text dimColor>
+					↑↓ / ^p ^n navigate · enter · esc quit · {props.results.length} results
+				</Text>
 			</Box>
 		</Box>
 	)
@@ -261,6 +363,14 @@ function SearchBody(props: SearchBodyProps) {
 	if (props.results.length > 0) {
 		return (
 			<Box flexDirection="column">
+				<Box>
+					<Box flexGrow={1}>
+						<Text dimColor>{"  Skills"}</Text>
+					</Box>
+					<Box marginLeft={2}>
+						<Text dimColor>Installs</Text>
+					</Box>
+				</Box>
 				{props.results.map((result, index) => (
 					<ResultRow
 						key={result.identifier}
@@ -281,13 +391,22 @@ function SearchBody(props: SearchBodyProps) {
 }
 
 function ResultRow(props: { readonly result: SkillSearchResult; readonly selected: boolean }) {
-	const gutter = props.result.installs !== undefined ? humanizeInstalls(props.result.installs) : "—"
+	const source = deriveSource(props.result.identifier)
+	const installs =
+		props.result.installs !== undefined ? humanizeInstalls(props.result.installs) : "—"
 	const prefix = props.selected ? "❯ " : "  "
-	const line = `${prefix}${gutter.padStart(5)}  ${props.result.identifier}`
 	return (
-		<Text {...(props.selected ? { color: "cyan" as const } : {})} wrap="truncate-end">
-			{line}
-		</Text>
+		<Box>
+			<Box flexGrow={1}>
+				<Text {...(props.selected ? { color: "cyan" as const } : {})}>
+					{`${prefix}${props.result.name}`}
+				</Text>
+				<Text dimColor>{` ${source}`}</Text>
+			</Box>
+			<Box marginLeft={2}>
+				<Text>{installs}</Text>
+			</Box>
+		</Box>
 	)
 }
 
@@ -303,7 +422,10 @@ function ActionsScreen(props: ActionsScreenProps) {
 	}
 	return (
 		<Box flexDirection="column">
-			<Text>{`  ${props.result.identifier}`}</Text>
+			<Box>
+				<Text>{`  ${props.result.name}`}</Text>
+				<Text dimColor>{` ${deriveSource(props.result.identifier)}`}</Text>
+			</Box>
 			<Box flexDirection="column" marginTop={1}>
 				{ACTIONS.map((action, index) => (
 					<Text
@@ -320,7 +442,7 @@ function ActionsScreen(props: ActionsScreenProps) {
 				</Box>
 			) : null}
 			<Box marginTop={1}>
-				<Text dimColor>↑↓ navigate · enter select · esc back</Text>
+				<Text dimColor>↑↓ / ^p ^n navigate · enter select · esc back</Text>
 			</Box>
 		</Box>
 	)
