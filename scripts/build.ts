@@ -1,21 +1,7 @@
 import { mkdirSync } from "node:fs"
+import { devtoolsStubPlugin } from "./devtools-stub-plugin"
 
 mkdirSync("dist", { recursive: true })
-
-/** Stub out react-devtools-core so Ink's devtools.js doesn't crash the Node bundle */
-const devtoolsStubPlugin: import("bun").BunPlugin = {
-	name: "react-devtools-core-stub",
-	setup(build) {
-		build.onResolve({ filter: /^react-devtools-core$/ }, () => ({
-			path: "react-devtools-core",
-			namespace: "devtools-stub",
-		}))
-		build.onLoad({ filter: /.*/, namespace: "devtools-stub" }, () => ({
-			contents: "export default { initialize() {}, connectToDevTools() {} }",
-			loader: "js",
-		}))
-	},
-}
 
 const result = await Bun.build({
 	entrypoints: ["src/cli.ts"],
