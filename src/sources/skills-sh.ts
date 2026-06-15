@@ -560,13 +560,14 @@ export const SkillsShSource: SkillSource = {
 
 		const skills = (
 			json as {
-				skills: Array<{ id: string; source: string; installs: number }>
+				skills: Array<{ id: string; name: string; source: string; installs: number }>
 			}
 		).skills
 		return skills
 			.filter(
-				(result): result is { id: string; source: string; installs: number } =>
+				(result): result is { id: string; name: string; source: string; installs: number } =>
 					typeof result.id === "string" &&
+					typeof result.name === "string" &&
 					typeof result.source === "string" &&
 					typeof result.installs === "number",
 			)
@@ -574,7 +575,8 @@ export const SkillsShSource: SkillSource = {
 				(result): SkillSearchResult => ({
 					scheme: "skills-sh",
 					identifier: result.id,
-					description: `Indexed by skills.sh from ${result.source} (${result.installs} installs)`,
+					name: result.name,
+					installs: result.installs,
 				}),
 			)
 	}),

@@ -65,7 +65,8 @@ cli.command("search", {
 		results: z.array(
 			z.object({
 				identifier: z.string(),
-				description: z.string(),
+				name: z.string(),
+				installs: z.number().optional(),
 				source: z.string(),
 			}),
 		),
@@ -90,11 +91,15 @@ cli.command("search", {
 				results = yield* searchAll(query, limit)
 			}
 			return {
-				results: results.map((r) => ({
-					identifier: r.identifier,
-					description: r.description,
-					source: r.scheme,
-				})),
+				results: results
+					.slice()
+					.sort((a, b) => (b.installs ?? 0) - (a.installs ?? 0))
+					.map((r) => ({
+						identifier: r.identifier,
+						name: r.name,
+						source: r.scheme,
+						...(r.installs !== undefined ? { installs: r.installs } : {}),
+					})),
 			}
 		})
 		try {
