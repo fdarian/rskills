@@ -3,6 +3,7 @@ import { Duration, Effect, Option, Ref } from "effect"
 import { FetchFailed, IsDirectory, NotFound, ParseFailed, RateLimited } from "#/errors.js"
 import type { ParsedUri } from "#/uri.js"
 import { serialize } from "#/uri.js"
+import { findSkillDirectoryViaTreeApi } from "./github-tree.js"
 import { type ResolvedSkillRoot, SkillsShCache } from "./skills-sh-cache.js"
 import type { SkillEntry, SkillSearchResult, SkillSource } from "./source.js"
 
@@ -251,7 +252,7 @@ const tryGitHubRawProbe = Effect.fn("tryGitHubRawProbe")(
 )
 
 /**
- * Step 2: Try fetching SKILL.md from unpkg using the npm package name from
+ * Step 3: Try fetching SKILL.md from unpkg using the npm package name from
  * the repo's package.json. Returns a BaseUrl root if found, or null if
  * package.json is missing / not parseable / unpkg returns 404.
  */
@@ -367,7 +368,7 @@ export const extractInstallCommand = Effect.fn("extractInstallCommand")(
 )
 
 /**
- * Step 3: Scrape the skills.sh detail page to extract the install command for
+ * Step 4: Scrape the skills.sh detail page to extract the install command for
  * use in error messages. Does not recover SKILL.md content (the page renders
  * it as HTML only, not as raw markdown).
  */
@@ -389,10 +390,11 @@ type BaseUrlRoot = BaseUrlSkillRoot & {
 }
 
 /**
- * Resolve the root for a skills-sh skill using a 3-step cascade:
+ * Resolve the root for a skills-sh skill using a 4-step cascade:
  * 1. GitHub raw probe (4 candidates)
- * 2. unpkg fallback (via package.json name)
- * 3. skills.sh detail page (install command extraction for error only)
+ * 2. GitHub Git Trees API discovery (monorepo layouts the raw probe can't guess)
+ * 3. unpkg fallback (via package.json name)
+ * 4. skills.sh detail page (install command extraction for error only)
  *
  * Used by `list` which always needs a BaseUrl root with GitHub metadata.
  * Caches the result in SkillsShCache.
@@ -404,7 +406,7 @@ function resolveSkillsShRoot(
 	skillId: string,
 	cache: Ref.Ref<Map<string, ResolvedSkillRoot>>,
 	cacheKey: string,
-): Effect.Effect<BaseUrlRoot, FetchFailed | NotFound, HttpClient.HttpClient> {
+): Effect.Effect<BaseUrlRoot, FetchFailed | NotFound | RateLimited, HttpClient.HttpClient> {
 	return Effect.gen(function* () {
 		const cached = (yield* Ref.get(cache)).get(cacheKey)
 		if (cached !== undefined && cached._tag === "BaseUrl") {
@@ -422,7 +424,19 @@ function resolveSkillsShRoot(
 			return baseUrlRootWithGh(githubResult.baseUrl, owner, repo)
 		}
 
-		// Step 2: unpkg fallback
+		// Step 2: GitHub Git Trees API discovery
+		const treeDirectory = yield* findSkillDirectoryViaTreeApi(owner, repo, skillPath)
+		if (treeDirectory !== null) {
+			const treeBaseUrl = `https://raw.githubusercontent.com/${owner}/${repo}/HEAD/${treeDirectory}`
+			yield* Ref.update(cache, (map) => {
+				const next = new Map(map)
+				next.set(cacheKey, { _tag: "BaseUrl" as const, baseUrl: treeBaseUrl })
+				return next
+			})
+			return baseUrlRootWithGh(treeBaseUrl, owner, repo)
+		}
+
+		// Step 3: unpkg fallback
 		const unpkgResult = yield* tryUnpkgFallback(owner, repo)
 		if (unpkgResult !== null) {
 			yield* Ref.update(cache, (map) => {
@@ -440,7 +454,7 @@ function resolveSkillsShRoot(
 			}
 		}
 
-		// Step 3: scrape for install command, then error
+		// Step 4: scrape for install command, then error
 		const installCommand = yield* tryScrapeDetailPage(owner, repo, skillId).pipe(
 			Effect.catchTag("FetchFailed", () => Effect.succeed(null)),
 		)
@@ -681,7 +695,45 @@ export const SkillsShSource: SkillSource = {
 			return result
 		}
 
-		// Step 2: unpkg fallback
+		// Step 2: GitHub Git Trees API discovery (monorepo layouts the raw
+		// probe's fixed candidates can't guess)
+		const treeDirectory = yield* findSkillDirectoryViaTreeApi(owner, repo, skillPath)
+		if (treeDirectory !== null) {
+			const treeBaseUrl = `https://raw.githubusercontent.com/${owner}/${repo}/HEAD/${treeDirectory}`
+			const treeRoot = { _tag: "BaseUrl" as const, baseUrl: treeBaseUrl }
+			yield* Ref.update(cache, (map) => {
+				const next = new Map(map)
+				next.set(uri.identifier, treeRoot)
+				return next
+			})
+			const result = yield* fetchFromBaseUrl(treeBaseUrl, subpathOrSkillMd).pipe(
+				Effect.catchTag("NotFound", () =>
+					Effect.gen(function* () {
+						// Check if it might be a directory
+						const root = baseUrlRootWithGh(treeBaseUrl, owner, repo)
+						const contentsPath = [root.ghSkillPath, subpathOrSkillMd].filter(Boolean).join("/")
+						const contentsResult = yield* fetchGitHubContents(
+							root.ghOwner,
+							root.ghRepo,
+							contentsPath,
+						).pipe(
+							Effect.catchTag("NotFound", () => Effect.succeed(null)),
+							Effect.catchTag("RateLimited", (e) => Effect.fail(e)),
+							Effect.catchTag("FetchFailed", () => Effect.succeed(null)),
+						)
+						if (contentsResult !== null && Array.isArray(contentsResult)) {
+							return yield* new IsDirectory({
+								message: `${serialize(uri)} is a directory, not a file. Use 'rskills ls' to list its contents.`,
+							})
+						}
+						return yield* new NotFound({ message: `Skill not found: ${uri.identifier}` })
+					}),
+				),
+			)
+			return result
+		}
+
+		// Step 3: unpkg fallback
 		const unpkgResult = yield* tryUnpkgFallback(owner, repo)
 		if (unpkgResult !== null) {
 			yield* Ref.update(cache, (map) => {
@@ -698,7 +750,7 @@ export const SkillsShSource: SkillSource = {
 			return result
 		}
 
-		// Step 3: scrape detail page for install command, then error
+		// Step 4: scrape detail page for install command, then error
 		const installCommand = yield* tryScrapeDetailPage(owner, repo, skillId).pipe(
 			Effect.catchTag("FetchFailed", () => Effect.succeed(null)),
 		)
