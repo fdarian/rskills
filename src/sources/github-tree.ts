@@ -18,7 +18,7 @@ type GitHubTreeResponse = {
  * shallowest (shortest) path wins so the result is deterministic. Returns the
  * directory containing SKILL.md, or null when nothing matches.
  */
-export function findSkillDirectory(
+function findSkillDirectory(
 	entries: ReadonlyArray<GitHubTreeEntry>,
 	skillPath: string,
 ): string | null {
