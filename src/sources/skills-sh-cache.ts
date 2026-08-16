@@ -2,7 +2,7 @@ import { Context, Effect, Layer, Ref } from "effect"
 
 export type ResolvedSkillRoot =
 	| { readonly _tag: "BaseUrl"; readonly baseUrl: string }
-	| { readonly _tag: "Content"; readonly content: string }
+	| { readonly _tag: "FileSet"; readonly files: ReadonlyMap<string, string> }
 
 export class SkillsShCache extends Context.Tag("SkillsShCache")<
 	SkillsShCache,
