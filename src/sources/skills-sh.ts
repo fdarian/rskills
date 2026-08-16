@@ -5,6 +5,7 @@ import type { ParsedUri } from "#/uri.js"
 import { serialize } from "#/uri.js"
 import { findSkillDirectoryViaTreeApi } from "./github-tree.js"
 import { type ResolvedSkillRoot, SkillsShCache } from "./skills-sh-cache.js"
+import { fetchSkillsShDownload } from "./skills-sh-download.js"
 import type { SkillEntry, SkillSearchResult, SkillSource } from "./source.js"
 
 function createClient(baseUrl: string) {
@@ -389,15 +390,98 @@ type BaseUrlRoot = BaseUrlSkillRoot & {
 	ghSkillPath: string
 }
 
+type FileSetSkillRoot = { readonly _tag: "FileSet"; readonly files: ReadonlyMap<string, string> }
+
 /**
- * Resolve the root for a skills-sh skill using a 4-step cascade:
+ * Read `subpathOrSkillMd` directly out of an already-fetched file set (step 2
+ * root). Shared by the cached-root and fresh-cascade paths in `read` since
+ * both need the same file/directory/not-found disambiguation.
+ */
+function readFromFileSet(
+	files: ReadonlyMap<string, string>,
+	subpathOrSkillMd: string,
+	uri: ParsedUri,
+): Effect.Effect<string, NotFound | IsDirectory> {
+	return Effect.gen(function* () {
+		const content = files.get(subpathOrSkillMd)
+		if (content !== undefined) {
+			return content
+		}
+
+		const directoryPrefix = `${subpathOrSkillMd}/`
+		const isDirectory = Array.from(files.keys()).some((path) => path.startsWith(directoryPrefix))
+		if (isDirectory) {
+			return yield* new IsDirectory({
+				message: `${serialize(uri)} is a directory, not a file. Use 'rskills ls' to list its contents.`,
+			})
+		}
+
+		return yield* new NotFound({ message: `Skill not found: ${uri.identifier}` })
+	})
+}
+
+/**
+ * Derive `ls` entries for a directory (or the root, when `subpathPart` is
+ * undefined) from a file set's flat path -> contents map: immediate child
+ * names, "directory" for inferred intermediate segments, "file" otherwise.
+ */
+function listEntriesFromFileSet(
+	files: ReadonlyMap<string, string>,
+	subpathPart: string | undefined,
+	uri: ParsedUri,
+): Effect.Effect<ReadonlyArray<SkillEntry>, NotFound> {
+	return Effect.gen(function* () {
+		if (subpathPart !== undefined && files.has(subpathPart)) {
+			return yield* new NotFound({
+				message: `${serialize(uri)} is a file, not a directory. Use 'rskills read' to read it.`,
+			})
+		}
+
+		const prefix = subpathPart === undefined ? "" : `${subpathPart}/`
+		const dirNames = new Set<string>()
+		const fileNames = new Set<string>()
+
+		for (const path of files.keys()) {
+			if (!path.startsWith(prefix)) {
+				continue
+			}
+			const remainder = path.slice(prefix.length)
+			if (remainder.length === 0) {
+				continue
+			}
+			const slashIndex = remainder.indexOf("/")
+			if (slashIndex === -1) {
+				fileNames.add(remainder)
+			} else {
+				dirNames.add(remainder.slice(0, slashIndex))
+			}
+		}
+
+		if (dirNames.size === 0 && fileNames.size === 0) {
+			return yield* new NotFound({
+				message: `${serialize(uri)} not found in skills.sh file set.`,
+			})
+		}
+
+		return [
+			...Array.from(dirNames, (name): SkillEntry => ({ name, type: "directory" as const })),
+			...Array.from(fileNames, (name): SkillEntry => ({ name, type: "file" as const })),
+		]
+	})
+}
+
+/**
+ * Resolve the root for a skills-sh skill using a 5-step cascade:
  * 1. GitHub raw probe (4 candidates)
- * 2. GitHub Git Trees API discovery (monorepo layouts the raw probe can't guess)
- * 3. unpkg fallback (via package.json name)
- * 4. skills.sh detail page (install command extraction for error only)
+ * 2. skills.sh file-set download (undocumented endpoint; a possibly-stale
+ *    snapshot and larger payload than step 1, so only tried after it misses)
+ * 3. GitHub Git Trees API discovery (monorepo layouts the raw probe can't guess)
+ * 4. unpkg fallback (via package.json name)
+ * 5. skills.sh detail page (install command extraction for error only)
  *
- * Used by `list` which always needs a BaseUrl root with GitHub metadata.
- * Caches the result in SkillsShCache.
+ * Used by `list`, which needs either a BaseUrl root with GitHub metadata or a
+ * FileSet root to derive entries from directly. Caches the result in
+ * SkillsShCache.
  */
 function resolveSkillsShRoot(
 	owner: string,
@@ -406,11 +490,18 @@ function resolveSkillsShRoot(
 	skillId: string,
 	cache: Ref.Ref<Map<string, ResolvedSkillRoot>>,
 	cacheKey: string,
-): Effect.Effect<BaseUrlRoot, FetchFailed | NotFound | RateLimited, HttpClient.HttpClient> {
+): Effect.Effect<
+	BaseUrlRoot | FileSetSkillRoot,
+	FetchFailed | NotFound | RateLimited,
+	HttpClient.HttpClient
+> {
 	return Effect.gen(function* () {
 		const cached = (yield* Ref.get(cache)).get(cacheKey)
 		if (cached !== undefined && cached._tag === "BaseUrl") {
 			return baseUrlRootWithGh(cached.baseUrl, owner, repo)
+		}
+		if (cached !== undefined && cached._tag === "FileSet") {
+			return cached
 		}
 
 		// Step 1: GitHub raw probe
@@ -424,7 +515,19 @@ function resolveSkillsShRoot(
 			return baseUrlRootWithGh(githubResult.baseUrl, owner, repo)
 		}
 
-		// Step 2: GitHub Git Trees API discovery
+		// Step 2: skills.sh file-set download
+		const downloadResult = yield* fetchSkillsShDownload(owner, repo, skillId)
+		if (downloadResult !== null) {
+			const fileSetRoot: FileSetSkillRoot = { _tag: "FileSet", files: downloadResult }
+			yield* Ref.update(cache, (map) => {
+				const next = new Map(map)
+				next.set(cacheKey, fileSetRoot)
+				return next
+			})
+			return fileSetRoot
+		}
+
+		// Step 3: GitHub Git Trees API discovery
 		const treeDirectory = yield* findSkillDirectoryViaTreeApi(owner, repo, skillPath)
 		if (treeDirectory !== null) {
 			const treeBaseUrl = `https://raw.githubusercontent.com/${owner}/${repo}/HEAD/${treeDirectory}`
@@ -436,7 +539,7 @@ function resolveSkillsShRoot(
 			return baseUrlRootWithGh(treeBaseUrl, owner, repo)
 		}
 
-		// Step 3: unpkg fallback
+		// Step 4: unpkg fallback
 		const unpkgResult = yield* tryUnpkgFallback(owner, repo)
 		if (unpkgResult !== null) {
 			yield* Ref.update(cache, (map) => {
@@ -454,7 +557,7 @@ function resolveSkillsShRoot(
 			}
 		}
 
-		// Step 4: scrape for install command, then error
+		// Step 5: scrape for install command, then error
 		const installCommand = yield* tryScrapeDetailPage(owner, repo, skillId).pipe(
 			Effect.catchTag("FetchFailed", () => Effect.succeed(null)),
 		)
@@ -462,12 +565,12 @@ function resolveSkillsShRoot(
 		const identifier = `${owner}/${repo}/${skillId}`
 		if (installCommand !== null) {
 			return yield* new NotFound({
-				message: `Skill '${identifier}' not found via GitHub raw, unpkg, or skills.sh content extraction. Install command (from skills.sh): ${installCommand}`,
+				message: `Skill '${identifier}' not found via GitHub raw, skills.sh download, unpkg, or skills.sh content extraction. Install command (from skills.sh): ${installCommand}`,
 			})
 		}
 
 		return yield* new NotFound({
-			message: `Skill '${identifier}' not found via GitHub raw, unpkg, or skills.sh content extraction.`,
+			message: `Skill '${identifier}' not found via GitHub raw, skills.sh download, unpkg, or skills.sh content extraction.`,
 		})
 	})
 }
@@ -659,15 +762,8 @@ export const SkillsShSource: SkillSource = {
 		const cachedRoot = (yield* Ref.get(cache)).get(uri.identifier)
 
 		if (cachedRoot !== undefined) {
-			if (cachedRoot._tag === "Content") {
-				// Content-kind: only SKILL.md is available
-				if (subpathOrSkillMd === "SKILL.md") {
-					return cachedRoot.content
-				}
-				return yield* new NotFound({
-					message:
-						"This skill is dynamically generated; only SKILL.md is available via rskills (skills-sh detail page).",
-				})
+			if (cachedRoot._tag === "FileSet") {
+				return yield* readFromFileSet(cachedRoot.files, subpathOrSkillMd, uri)
 			}
 
 			// BaseUrl-kind: fetch from the resolved base URL
@@ -720,7 +816,20 @@ export const SkillsShSource: SkillSource = {
 			)
 		}
 
-		// Step 2: GitHub Git Trees API discovery (monorepo layouts the raw
+		// Step 2: skills.sh file-set download (undocumented endpoint; a
+		// possibly-stale snapshot and larger payload than step 1, so only
+		// tried after the raw probe misses)
+		const downloadResult = yield* fetchSkillsShDownload(owner, repo, skillId)
+		if (downloadResult !== null) {
+			yield* Ref.update(cache, (map) => {
+				const next = new Map(map)
+				next.set(uri.identifier, { _tag: "FileSet" as const, files: downloadResult })
+				return next
+			})
+			return yield* readFromFileSet(downloadResult, subpathOrSkillMd, uri)
+		}
+
+		// Step 3: GitHub Git Trees API discovery (monorepo layouts the raw
 		// probe's fixed candidates can't guess)
 		const treeDirectory = yield* findSkillDirectoryViaTreeApi(owner, repo, skillPath)
 		if (treeDirectory !== null) {
@@ -734,7 +843,7 @@ export const SkillsShSource: SkillSource = {
 			return yield* fetchFromFreshGitHubRoot(treeBaseUrl, subpathOrSkillMd, owner, repo, uri)
 		}
 
-		// Step 3: unpkg fallback
+		// Step 4: unpkg fallback
 		const unpkgResult = yield* tryUnpkgFallback(owner, repo)
 		if (unpkgResult !== null) {
 			yield* Ref.update(cache, (map) => {
@@ -751,7 +860,7 @@ export const SkillsShSource: SkillSource = {
 			return result
 		}
 
-		// Step 4: scrape detail page for install command, then error
+		// Step 5: scrape detail page for install command, then error
 		const installCommand = yield* tryScrapeDetailPage(owner, repo, skillId).pipe(
 			Effect.catchTag("FetchFailed", () => Effect.succeed(null)),
 		)
@@ -771,12 +880,12 @@ export const SkillsShSource: SkillSource = {
 		const identifier = uri.identifier
 		if (installCommand !== null) {
 			return yield* new NotFound({
-				message: `Skill '${identifier}' not found via GitHub raw, unpkg, or skills.sh content extraction. Install command (from skills.sh): ${installCommand}`,
+				message: `Skill '${identifier}' not found via GitHub raw, skills.sh download, unpkg, or skills.sh content extraction. Install command (from skills.sh): ${installCommand}`,
 			})
 		}
 
 		return yield* new NotFound({
-			message: `Skill '${identifier}' not found via GitHub raw, unpkg, or skills.sh content extraction.`,
+			message: `Skill '${identifier}' not found via GitHub raw, skills.sh download, unpkg, or skills.sh content extraction.`,
 		})
 	}),
 
@@ -803,9 +912,14 @@ export const SkillsShSource: SkillSource = {
 			uri.identifier,
 		)
 
+		const subpathPart = Option.isSome(uri.subpath) ? uri.subpath.value : undefined
+
+		if (resolvedRoot._tag === "FileSet") {
+			return yield* listEntriesFromFileSet(resolvedRoot.files, subpathPart, uri)
+		}
+
 		// If resolved via unpkg, GitHub Contents API may not correspond to the
 		// npm package layout — but we can still try using the original owner/repo.
-		const subpathPart = Option.isSome(uri.subpath) ? uri.subpath.value : undefined
 		const contentsPath = subpathPart
 			? [resolvedRoot.ghSkillPath, subpathPart].filter(Boolean).join("/")
 			: resolvedRoot.ghSkillPath
