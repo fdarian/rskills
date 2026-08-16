@@ -487,6 +487,49 @@ function baseUrlRootWithGh(baseUrl: string, owner: string, repo: string): BaseUr
 	return { _tag: "BaseUrl" as const, baseUrl, ghOwner: owner, ghRepo: repo, ghSkillPath: "" }
 }
 
+/**
+ * Fetch `subpathOrSkillMd` from a freshly-resolved GitHub raw root
+ * (step 1's or step 2's), and on 404 ask the Contents API whether the path
+ * is actually a directory before giving up. Shared by both cascade steps
+ * since a fresh root always needs this same disambiguation.
+ */
+function fetchFromFreshGitHubRoot(
+	baseUrl: string,
+	subpathOrSkillMd: string,
+	owner: string,
+	repo: string,
+	uri: ParsedUri,
+): Effect.Effect<
+	string,
+	FetchFailed | NotFound | RateLimited | IsDirectory,
+	HttpClient.HttpClient
+> {
+	return fetchFromBaseUrl(baseUrl, subpathOrSkillMd).pipe(
+		Effect.catchTag("NotFound", () =>
+			Effect.gen(function* () {
+				// Check if it might be a directory
+				const root = baseUrlRootWithGh(baseUrl, owner, repo)
+				const contentsPath = [root.ghSkillPath, subpathOrSkillMd].filter(Boolean).join("/")
+				const contentsResult = yield* fetchGitHubContents(
+					root.ghOwner,
+					root.ghRepo,
+					contentsPath,
+				).pipe(
+					Effect.catchTag("NotFound", () => Effect.succeed(null)),
+					Effect.catchTag("RateLimited", (e) => Effect.fail(e)),
+					Effect.catchTag("FetchFailed", () => Effect.succeed(null)),
+				)
+				if (contentsResult !== null && Array.isArray(contentsResult)) {
+					return yield* new IsDirectory({
+						message: `${serialize(uri)} is a directory, not a file. Use 'rskills ls' to list its contents.`,
+					})
+				}
+				return yield* new NotFound({ message: `Skill not found: ${uri.identifier}` })
+			}),
+		),
+	)
+}
+
 function fetchFromBaseUrl(
 	baseUrl: string,
 	subpathOrSkillMd: string,
@@ -668,31 +711,13 @@ export const SkillsShSource: SkillSource = {
 				next.set(uri.identifier, githubResult)
 				return next
 			})
-			const result = yield* fetchFromBaseUrl(githubResult.baseUrl, subpathOrSkillMd).pipe(
-				Effect.catchTag("NotFound", () =>
-					Effect.gen(function* () {
-						// Check if it might be a directory
-						const root = baseUrlRootWithGh(githubResult.baseUrl, owner, repo)
-						const contentsPath = [root.ghSkillPath, subpathOrSkillMd].filter(Boolean).join("/")
-						const contentsResult = yield* fetchGitHubContents(
-							root.ghOwner,
-							root.ghRepo,
-							contentsPath,
-						).pipe(
-							Effect.catchTag("NotFound", () => Effect.succeed(null)),
-							Effect.catchTag("RateLimited", (e) => Effect.fail(e)),
-							Effect.catchTag("FetchFailed", () => Effect.succeed(null)),
-						)
-						if (contentsResult !== null && Array.isArray(contentsResult)) {
-							return yield* new IsDirectory({
-								message: `${serialize(uri)} is a directory, not a file. Use 'rskills ls' to list its contents.`,
-							})
-						}
-						return yield* new NotFound({ message: `Skill not found: ${uri.identifier}` })
-					}),
-				),
+			return yield* fetchFromFreshGitHubRoot(
+				githubResult.baseUrl,
+				subpathOrSkillMd,
+				owner,
+				repo,
+				uri,
 			)
-			return result
 		}
 
 		// Step 2: GitHub Git Trees API discovery (monorepo layouts the raw
@@ -706,31 +731,7 @@ export const SkillsShSource: SkillSource = {
 				next.set(uri.identifier, treeRoot)
 				return next
 			})
-			const result = yield* fetchFromBaseUrl(treeBaseUrl, subpathOrSkillMd).pipe(
-				Effect.catchTag("NotFound", () =>
-					Effect.gen(function* () {
-						// Check if it might be a directory
-						const root = baseUrlRootWithGh(treeBaseUrl, owner, repo)
-						const contentsPath = [root.ghSkillPath, subpathOrSkillMd].filter(Boolean).join("/")
-						const contentsResult = yield* fetchGitHubContents(
-							root.ghOwner,
-							root.ghRepo,
-							contentsPath,
-						).pipe(
-							Effect.catchTag("NotFound", () => Effect.succeed(null)),
-							Effect.catchTag("RateLimited", (e) => Effect.fail(e)),
-							Effect.catchTag("FetchFailed", () => Effect.succeed(null)),
-						)
-						if (contentsResult !== null && Array.isArray(contentsResult)) {
-							return yield* new IsDirectory({
-								message: `${serialize(uri)} is a directory, not a file. Use 'rskills ls' to list its contents.`,
-							})
-						}
-						return yield* new NotFound({ message: `Skill not found: ${uri.identifier}` })
-					}),
-				),
-			)
-			return result
+			return yield* fetchFromFreshGitHubRoot(treeBaseUrl, subpathOrSkillMd, owner, repo, uri)
 		}
 
 		// Step 3: unpkg fallback
