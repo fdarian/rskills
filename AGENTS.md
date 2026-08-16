@@ -14,7 +14,7 @@ A Bun + Effect.ts CLI for reading remote [skills](https://agentskills.io/) witho
 
 | Source | Identifier | Search? | Read? | List? |
 |---|---|---|---|---|
-| `skills-sh` | `<owner>/<repo>/<skill-path>` | ✓ (skills.sh API) | ✓ (4-step cascade: GitHub raw → GitHub Trees API → unpkg → skills.sh page) | ✓ (GitHub Contents API against resolved root) |
+| `skills-sh` | `<owner>/<repo>/<skill-path>` | ✓ (skills.sh API) | ✓ (5-step cascade: GitHub raw → skills.sh download → GitHub Trees API → unpkg → skills.sh page) | ✓ (GitHub Contents API, or the downloaded file set directly, against resolved root) |
 | `github` | `<owner>/<repo>/<path>` | — | ✓ (raw.githubusercontent.com) | ✓ (GitHub Contents API) |
 | `well-known` | `<host-or-base-url>` | ✓ (fetches `/.well-known/skills/index.json`) | ✓ | ✓ (derives from `files` array in index; `NotFound` if no `files`) |
 | `https` | full `https://…md` URL | — | ✓ (must end in `.md`) | — |
@@ -50,7 +50,7 @@ Resolve `<skill-name>` against Claude Code skill roots in order; first existing 
 
 ## skills-sh resolution cascade
 
-`read` (and the `list`-supporting `resolveSkillsShRoot`) runs a 4-step cascade to locate a skill's SKILL.md:
+`read` (and the `list`-supporting `resolveSkillsShRoot`) runs a 5-step cascade to locate a skill's SKILL.md:
 
 ### Step 1 — GitHub raw probe
 
@@ -64,9 +64,19 @@ If all 4 return 404, probe the bare prefix blobs for `skills`, `.agents/skills`,
 
 First 200 → resolved root cached as `{ _tag: "BaseUrl"; baseUrl: string }`. Subsequent reads append `/<subpathOrSKILL.md>`.
 
-### Step 2 — GitHub Git Trees API discovery (`src/sources/github-tree.ts`)
+### Step 2 — skills.sh file-set download (`src/sources/skills-sh-download.ts`)
 
-Triggered when step 1's 4 candidates (plus its symlink fallback) all 404 — no finite candidate list generalizes to arbitrary monorepo layouts (e.g. `trycua/cua` keeps skills at `libs/cua-driver/rust/Skills/cua-driver/SKILL.md`).
+Triggered when step 1's 4 candidates (plus its symlink fallback) all 404. An undocumented, unauthenticated skills.sh endpoint returns a skill's entire file set in one request:
+
+`GET https://skills.sh/api/download/{owner}/{repo}/{skillId}` → `{ "files": [{ "path": "SKILL.md", "contents": "..." }, ...] }`. `path` is skill-relative, not repo-relative.
+
+It runs before the GitHub Trees API (step 3) because it needs only one request regardless of repo size, at the cost of possibly serving a stale skills.sh snapshot rather than live repo content. The endpoint is undocumented (found by reading `vercel-labs/skills`' `src/blob.ts`) and could disappear or change shape without notice — any non-200 status or unparseable body returns `null` and the cascade falls through to the Trees API.
+
+A match → resolved root cached as `{ _tag: "FileSet"; files: ReadonlyMap<string, string> }`. `read` looks up the requested subpath (default `SKILL.md`) directly in the map; a key that's a prefix of other keys but not itself a key raises `IsDirectory`. `list` derives entries from the map's keys at the requested depth — no further network calls for either.
+
+### Step 3 — GitHub Git Trees API discovery (`src/sources/github-tree.ts`)
+
+Triggered when step 2 also finds no match — no finite candidate list generalizes to arbitrary monorepo layouts (e.g. `trycua/cua` keeps skills at `libs/cua-driver/rust/Skills/cua-driver/SKILL.md`).
 
 1. Fetch `https://api.github.com/repos/{owner}/{repo}/git/trees/HEAD?recursive=1`.
 2. Suffix-match blob paths (case-insensitive) against `{skillPath}/SKILL.md`, including an exact match at repo root. Multiple matches resolve to the shortest (shallowest) path.
@@ -74,29 +84,29 @@ Triggered when step 1's 4 candidates (plus its symlink fallback) all 404 — no 
 
 A match → resolved root cached as `{ _tag: "BaseUrl"; baseUrl: "https://raw.githubusercontent.com/{owner}/{repo}/HEAD/{matchedDir}" }`, same shape as step 1's, so subpath reads and `ls` resolve off it identically. A 403 from the Trees API surfaces as `RateLimited`, matching the GitHub Contents API convention used elsewhere in this file (`fetchGitHubContents`).
 
-### Step 3 — unpkg fallback
+### Step 4 — unpkg fallback
 
-Triggered when step 2 also finds no match. Some skills ship SKILL.md only in their npm package (generated at build time), not in the GitHub repo.
+Triggered when step 3 also finds no match. Some skills ship SKILL.md only in their npm package (generated at build time), not in the GitHub repo.
 
 1. Fetch `https://raw.githubusercontent.com/{owner}/{repo}/HEAD/package.json`. If not 200 or not parseable, skip.
 2. Read `name` from the JSON.
 3. Probe `https://unpkg.com/{name}@latest/SKILL.md`. If 200, cache root as `{ _tag: "BaseUrl"; baseUrl: "https://unpkg.com/{name}@latest" }`.
 
-### Step 4 — skills.sh detail page (install command only)
+### Step 5 — skills.sh detail page (install command only)
 
 Triggered when unpkg also 404s. Fetches `https://www.skills.sh/{owner}/{repo}/{skillId}` and extracts the `npx skills add …` install command from the rendered HTML.
 
-**No SKILL.md content recovery**: skills.sh uses Next.js App Router — there is no `__NEXT_DATA__` blob and SKILL.md is rendered as HTML only, not embedded as raw markdown. Step 4 only provides the install command to include in the `NotFound` error message.
+**No SKILL.md content recovery**: skills.sh uses Next.js App Router — there is no `__NEXT_DATA__` blob and SKILL.md is rendered as HTML only, not embedded as raw markdown. Step 5 only provides the install command to include in the `NotFound` error message.
 
 ### `ResolvedSkillRoot` type
 
 ```ts
 type ResolvedSkillRoot =
   | { readonly _tag: "BaseUrl"; readonly baseUrl: string }
-  | { readonly _tag: "Content"; readonly content: string }
+  | { readonly _tag: "FileSet"; readonly files: ReadonlyMap<string, string> }
 ```
 
-Cached in `SkillsShCache` (`Ref<Map<string, ResolvedSkillRoot>>`). `Content`-kind roots (reserved for future use) only serve `SKILL.md` from the cached string; any other subpath returns `NotFound` with a "dynamically generated" message.
+Cached in `SkillsShCache` (`Ref<Map<string, ResolvedSkillRoot>>`). `BaseUrl` roots (steps 1, 3, 4) resolve a subpath by appending it to `baseUrl` and fetching. `FileSet` roots (step 2) serve every subpath directly from the cached map, with no further network calls.
 
 ## Source plugin contract
 
