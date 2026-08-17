@@ -1,5 +1,11 @@
 # rskills-cli
 
+## 0.2.1
+
+### Patch Changes
+
+- 7a20162: Fix `read`/`ls` for skills-sh skills nested deep in monorepos (e.g. `trycua/cua/cua-driver`). When the fixed raw-root candidates 404, fall back to the skills.sh file-set download endpoint, then to GitHub's recursive Git Trees API.
+
 ## 0.2.0
 
 ### Minor Changes
