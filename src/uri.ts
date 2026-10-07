@@ -11,7 +11,10 @@ export interface ParsedUri {
 
 const boundarySegments = new Set(["references", "scripts", "templates", "assets", "SKILL.md"])
 
-function detectSubpath(segments: string[]): { identifier: string; subpath: Option.Option<string> } {
+function detectSubpath(
+	segments: string[],
+	scheme: Scheme,
+): { identifier: string; subpath: Option.Option<string> } {
 	const boundaryIndex = segments.findIndex((segment) => boundarySegments.has(segment))
 	if (boundaryIndex !== -1) {
 		return {
@@ -20,7 +23,9 @@ function detectSubpath(segments: string[]): { identifier: string; subpath: Optio
 		}
 	}
 	const lastSegment = segments[segments.length - 1]
-	if (lastSegment !== undefined && /\.\w+$/.test(lastSegment)) {
+	// For well-known the first segment is a host (`fframes.studio`), whose TLD looks like a file extension.
+	const isHostSegment = scheme === "well-known" && segments.length === 1
+	if (lastSegment !== undefined && !isHostSegment && /\.\w+$/.test(lastSegment)) {
 		return {
 			identifier: segments.slice(0, segments.length - 1).join("/"),
 			subpath: Option.some(lastSegment),
@@ -75,7 +80,7 @@ export function parse(
 		}
 
 		const segments = rest.split("/").filter((s) => s.length > 0)
-		const { identifier, subpath } = detectSubpath(segments)
+		const { identifier, subpath } = detectSubpath(segments, scheme)
 
 		return { scheme, identifier, subpath }
 	})
