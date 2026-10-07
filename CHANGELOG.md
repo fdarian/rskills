@@ -1,5 +1,11 @@
 # rskills-cli
 
+## 0.2.2
+
+### Patch Changes
+
+- 4873427: Support site URLs like `https://fframes.studio` (as in `npx skills add <url>`) by resolving them through the `well-known` source, which now also probes `/.well-known/agent-skills/index.json`.
+
 ## 0.2.1
 
 ### Patch Changes
