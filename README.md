@@ -63,9 +63,12 @@ rskills search react --limit 5 --format json   # structured output, skip picker
 |---|---|---|---|---|
 | `skills-sh` | `skills-sh://vercel-labs/json-render/json-render-react` | ✓ | ✓ | ✓ |
 | `github` | `github://anthropics/skills/skills/pdf` | — | ✓ | ✓ |
-| `well-known` | `well-known://mintlify.com/docs` | ✓ | ✓ | ✓ (requires `files` array in index) |
-| `https` | `https://example.com/SKILL.md` (must end in `.md`) | — | ✓ | — |
+| `well-known` | `well-known://mintlify.com/docs` | ✓ | ✓ | ✓ (bare host lists skills; a skill requires `files` array in index) |
+| `https` | `https://example.com/SKILL.md` (path ends in `.md`) | — | ✓ | — |
+| `https` (other) | `https://mintlify.com/docs` — any non-`.md` `https://` URL is treated as `well-known` | ✓ | ✓ | ✓ |
 | `claude` | `claude://my-skill` | — | ✓ (local) | ✓ |
+
+`well-known` looks for `/.well-known/agent-skills/index.json` first, then the legacy `/.well-known/skills/index.json`, under the given URL and then the site root.
 
 Local `claude` skills resolve under `<cwd>/.claude/skills/` then `~/.claude/skills/` (first match wins). By default, `read` strips YAML frontmatter and runs inline `` !`shell` `` / ` ```! ` blocks (respects `shell:` frontmatter and `disableSkillShellExecution` in settings). Use `read --raw` for the literal file.
 

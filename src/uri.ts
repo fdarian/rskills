@@ -11,7 +11,10 @@ export interface ParsedUri {
 
 const boundarySegments = new Set(["references", "scripts", "templates", "assets", "SKILL.md"])
 
-function detectSubpath(segments: string[]): { identifier: string; subpath: Option.Option<string> } {
+function detectSubpath(
+	segments: string[],
+	scheme: Scheme,
+): { identifier: string; subpath: Option.Option<string> } {
 	const boundaryIndex = segments.findIndex((segment) => boundarySegments.has(segment))
 	if (boundaryIndex !== -1) {
 		return {
@@ -20,7 +23,9 @@ function detectSubpath(segments: string[]): { identifier: string; subpath: Optio
 		}
 	}
 	const lastSegment = segments[segments.length - 1]
-	if (lastSegment !== undefined && /\.\w+$/.test(lastSegment)) {
+	// For well-known the first segment is a host (`fframes.studio`), whose TLD looks like a file extension.
+	const isHostSegment = scheme === "well-known" && segments.length === 1
+	if (lastSegment !== undefined && !isHostSegment && /\.\w+$/.test(lastSegment)) {
 		return {
 			identifier: segments.slice(0, segments.length - 1).join("/"),
 			subpath: Option.some(lastSegment),
@@ -29,12 +34,31 @@ function detectSubpath(segments: string[]): { identifier: string; subpath: Optio
 	return { identifier: segments.join("/"), subpath: Option.none() }
 }
 
+function parseHttps(uriString: string): Effect.Effect<ParsedUri, ParseFailed> {
+	return Effect.gen(function* () {
+		const url = yield* Effect.try({
+			try: () => new URL(uriString),
+			catch: (cause) => new ParseFailed({ message: `Invalid URL: "${uriString}"`, cause }),
+		})
+		if (url.pathname.endsWith(".md")) {
+			return { scheme: "https" as const, identifier: uriString, subpath: Option.none() }
+		}
+		// Non-.md URLs are skill hosts (as in `npx skills add https://host`), served via the well-known index.
+		const path = url.pathname.replace(/\/+$/, "")
+		return {
+			scheme: "well-known" as const,
+			identifier: `${url.origin}${path}`,
+			subpath: Option.none(),
+		}
+	})
+}
+
 export function parse(
 	uriString: string,
 ): Effect.Effect<ParsedUri, ParseFailed | UnsupportedScheme> {
 	return Effect.gen(function* () {
 		if (uriString.startsWith("https://")) {
-			return { scheme: "https" as const, identifier: uriString, subpath: Option.none() }
+			return yield* parseHttps(uriString)
 		}
 
 		const schemeSeparatorIndex = uriString.indexOf("://")
@@ -56,7 +80,7 @@ export function parse(
 		}
 
 		const segments = rest.split("/").filter((s) => s.length > 0)
-		const { identifier, subpath } = detectSubpath(segments)
+		const { identifier, subpath } = detectSubpath(segments, scheme)
 
 		return { scheme, identifier, subpath }
 	})
