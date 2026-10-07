@@ -16,7 +16,7 @@ A Bun + Effect.ts CLI for reading remote [skills](https://agentskills.io/) witho
 |---|---|---|---|---|
 | `skills-sh` | `<owner>/<repo>/<skill-path>` | ✓ (skills.sh API) | ✓ (5-step cascade: GitHub raw → skills.sh download → GitHub Trees API → unpkg → skills.sh page) | ✓ (GitHub Contents API, or the downloaded file set directly, against resolved root) |
 | `github` | `<owner>/<repo>/<path>` | — | ✓ (raw.githubusercontent.com) | ✓ (GitHub Contents API) |
-| `well-known` | `<host-or-base-url>` | ✓ (fetches `/.well-known/skills/index.json`) | ✓ | ✓ (derives from `files` array in index; `NotFound` if no `files`) |
+| `well-known` | `<host-or-base-url>[/<skill-name>[/<subpath>]]` | ✓ (fetches the well-known index, see below) | ✓ | ✓ (bare host lists the index's skills; with a skill name, derives from its `files` array; `NotFound` if no `files`) |
 | `https` | full `https://…/*.md` URL (pathname ends in `.md`) | — | ✓ | — |
 | `well-known` (via `https://`) | any other `https://host[/base]` URL | ✓ | ✓ | ✓ |
 | `claude` | `<skill-name>` (single segment) | — | ✓ (local filesystem) | ✓ |
@@ -29,7 +29,7 @@ The boundary between `identifier` and `subpath` is detected heuristically in `sr
 2. Else if the **last segment has a file extension** (`/\.\w+$/`), it's the subpath (handles top-level siblings like `pdf/reference.md`).
 3. Otherwise the whole path is the identifier and `SKILL.md` is fetched.
 
-`https://` URIs skip subpath detection. In `src/uri.ts`, a URL whose pathname ends in `.md` stays `https` and is fetched as-is; any other `https://` URL is rewritten to `well-known` with the normalized `origin + pathname` (trailing slash stripped, query/hash dropped) as the identifier, so `https://fframes.studio` resolves against `https://fframes.studio/.well-known/skills/index.json` (mirrors `npx skills add <url>`). Known gaps: the newer `/.well-known/agent-skills/index.json` path is not probed, and a bare `well-known://host.tld` (no path) mis-parses because `detectSubpath` treats `host.tld` as a file subpath — the `https://` form avoids this. Skill name is the last path segment of the identifier, as with any `well-known` URI; there is no separate skill-name/subpath after the host.
+`https://` URIs skip subpath detection. In `src/uri.ts`, a URL whose pathname ends in `.md` stays `https` and is fetched as-is; any other `https://` URL is rewritten to `well-known` with the normalized `origin + pathname` (trailing slash stripped, query/hash dropped) as the identifier, so `https://fframes.studio` behaves exactly like `well-known://fframes.studio` (mirrors `npx skills add <url>`). `detectSubpath` never treats a lone `well-known` host segment (`host.tld`) as a file subpath.
 
 ## claude local resolution
 
@@ -48,6 +48,17 @@ Resolve `<skill-name>` against Claude Code skill roots in order; first existing 
 - `claude://` additionally preprocesses inline shell placeholders in `src/sources/claude-preprocess.ts`; its `shell` frontmatter field selects `bash` (default) or `powershell` for execution.
 - Execute inline `` !`cmd` `` (only when `!` is line-start or whitespace-prefixed; `KEY=!`cmd`` stays literal) and fenced ` ```! ` blocks; substitute stdout once (no re-scan). Non-zero exit still substitutes stdout.
 - Honor `disableSkillShellExecution: true` in `<cwd>/.claude/settings.json` or `~/.claude/settings.json` — commands become `[shell command execution disabled by policy]`.
+
+## well-known index resolution
+
+`fetchIndex` in `src/sources/well-known.ts` copies the probe order of `vercel-labs/skills` (`src/providers/wellknown.ts`); first valid index wins:
+
+1. `{base}/.well-known/agent-skills/index.json`
+2. `{origin}/.well-known/agent-skills/index.json` (only when the base has a path)
+3. `{base}/.well-known/skills/index.json` (legacy)
+4. `{origin}/.well-known/skills/index.json` (only when the base has a path)
+
+The matching root and well-known directory are carried with the index, so skill files are fetched from `{root}/{wellKnownPath}/{skill}/{file}`. Because of the origin fallback, `well-known://host/<skill-name>` works even though the skill name is part of the path. Only the `files[]` index model is supported; the v0.2.0 artifact (`url`/archive) entries are not. The skill name is the last path segment of the identifier; a bare host has none, so `ls` lists the index's skills and `read` fails with the available names.
 
 ## skills-sh resolution cascade
 
