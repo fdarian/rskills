@@ -12,19 +12,27 @@ function buildBaseUrl(identifier: string): string {
 	return `https://${identifier}`
 }
 
-function getLastSegment(identifier: string): string {
-	const segments = identifier.split("/").filter((s) => s.length > 0)
-	const last = segments[segments.length - 1]
-	if (last === undefined) {
-		return identifier
-	}
-	return last
+/** Last path segment of the identifier URL; undefined for a bare host. */
+function getSkillName(identifier: string): string | undefined {
+	const segments = new URL(buildBaseUrl(identifier)).pathname.split("/").filter((s) => s.length > 0)
+	return segments[segments.length - 1]
 }
 
-function fetchIndex(baseUrl: string) {
+// Order mirrors vercel-labs/skills (src/providers/wellknown.ts): agent-skills first, legacy skills second.
+const wellKnownPaths = [".well-known/agent-skills", ".well-known/skills"] as const
+
+type WellKnownIndex = { skills: Array<{ name: string; description?: string; files?: string[] }> }
+
+type ResolvedIndex = {
+	readonly index: WellKnownIndex
+	/** Origin + path the matching index was found under; skill files hang off `{baseUrl}/{wellKnownPath}/{skill}/`. */
+	readonly baseUrl: string
+	readonly wellKnownPath: (typeof wellKnownPaths)[number]
+}
+
+function fetchIndexAt(indexUrl: string) {
 	return Effect.gen(function* () {
 		const client = yield* HttpClient.HttpClient
-		const indexUrl = `${baseUrl}/.well-known/skills/index.json`
 		const response = yield* client.get(indexUrl).pipe(
 			Effect.timeout(Duration.seconds(20)),
 			Effect.catchAll(
@@ -70,7 +78,39 @@ function fetchIndex(baseUrl: string) {
 			})
 		}
 
-		return json as { skills: Array<{ name: string; description?: string; files?: string[] }> }
+		return json as WellKnownIndex
+	})
+}
+
+/** Tries each well-known path under the base URL, then (if the base has a path) under the origin root. */
+function fetchIndex(baseUrl: string) {
+	return Effect.gen(function* () {
+		const parsed = new URL(baseUrl)
+		const basePath = parsed.pathname.replace(/\/+$/, "")
+		const roots = basePath === "" ? [parsed.origin] : [`${parsed.origin}${basePath}`, parsed.origin]
+
+		let firstError: FetchFailed | ParseFailed | undefined
+		const tried: string[] = []
+		for (const wellKnownPath of wellKnownPaths) {
+			for (const root of roots) {
+				const indexUrl = `${root}/${wellKnownPath}/index.json`
+				tried.push(indexUrl)
+				const result = yield* Effect.either(fetchIndexAt(indexUrl))
+				if (result._tag === "Right") {
+					return { index: result.right, baseUrl: root, wellKnownPath } satisfies ResolvedIndex
+				}
+				if (result.left._tag !== "NotFound" && firstError === undefined) {
+					firstError = result.left
+				}
+			}
+		}
+
+		if (firstError !== undefined) {
+			return yield* firstError
+		}
+		return yield* new NotFound({
+			message: `No well-known skills index found. Tried: ${tried.join(", ")}`,
+		})
 	})
 }
 
@@ -113,6 +153,20 @@ function fetchText(url: string) {
 	})
 }
 
+function findSkill(uri: ParsedUri, resolved: ResolvedIndex) {
+	return Effect.gen(function* () {
+		const skillName = getSkillName(uri.identifier)
+		const skill = resolved.index.skills.find((s) => s.name === skillName)
+		if (skill === undefined) {
+			const available = resolved.index.skills.map((s) => s.name).join(", ")
+			return yield* new NotFound({
+				message: `Skill "${skillName ?? uri.identifier}" not found in well-known index at ${resolved.baseUrl}/${resolved.wellKnownPath}/index.json. Available: ${available}`,
+			})
+		}
+		return skill
+	})
+}
+
 export const WellKnownSource: SkillSource = {
 	scheme: "well-known",
 
@@ -120,16 +174,8 @@ export const WellKnownSource: SkillSource = {
 		uri: ParsedUri,
 		_options?: import("./source.js").SkillReadOptions,
 	) {
-		const baseUrl = buildBaseUrl(uri.identifier)
-		const skillName = getLastSegment(uri.identifier)
-		const index = yield* fetchIndex(baseUrl)
-
-		const skill = index.skills.find((s) => s.name === skillName)
-		if (!skill) {
-			return yield* new NotFound({
-				message: `Skill "${skillName}" not found in well-known index at ${baseUrl}`,
-			})
-		}
+		const resolved = yield* fetchIndex(buildBaseUrl(uri.identifier))
+		const skill = yield* findSkill(uri, resolved)
 
 		const subpathOrSkillMd = Option.isSome(uri.subpath) ? uri.subpath.value : "SKILL.md"
 
@@ -148,14 +194,13 @@ export const WellKnownSource: SkillSource = {
 			}
 		}
 
-		const fileUrl = `${baseUrl}/.well-known/skills/${skillName}/${subpathOrSkillMd}`
+		const fileUrl = `${resolved.baseUrl}/${resolved.wellKnownPath}/${skill.name}/${subpathOrSkillMd}`
 
 		return yield* fetchText(fileUrl)
 	}),
 
 	search: Effect.fn("WellKnownSource.search")(function* (query: string, limit: number) {
-		const baseUrl = buildBaseUrl(query)
-		const index = yield* fetchIndex(baseUrl).pipe(
+		const resolved = yield* fetchIndex(buildBaseUrl(query)).pipe(
 			Effect.catchTag("NotFound", (error) =>
 				Effect.fail(
 					new FetchFailed({
@@ -166,7 +211,7 @@ export const WellKnownSource: SkillSource = {
 			),
 		)
 
-		const results = index.skills.slice(0, limit).map(
+		const results = resolved.index.skills.slice(0, limit).map(
 			(skill): SkillSearchResult => ({
 				scheme: "well-known",
 				identifier: skill.name,
@@ -178,20 +223,17 @@ export const WellKnownSource: SkillSource = {
 	}),
 
 	list: Effect.fn("WellKnownSource.list")(function* (uri: ParsedUri) {
-		const baseUrl = buildBaseUrl(uri.identifier)
-		const skillName = getLastSegment(uri.identifier)
-		const index = yield* fetchIndex(baseUrl)
+		const resolved = yield* fetchIndex(buildBaseUrl(uri.identifier))
 
-		const skill = index.skills.find((s) => s.name === skillName)
-		if (!skill) {
-			return yield* new NotFound({
-				message: `Skill "${skillName}" not found in well-known index at ${baseUrl}`,
-			})
+		if (getSkillName(uri.identifier) === undefined) {
+			return resolved.index.skills.map((s): SkillEntry => ({ name: s.name, type: "directory" }))
 		}
+
+		const skill = yield* findSkill(uri, resolved)
 
 		if (skill.files === undefined) {
 			return yield* new NotFound({
-				message: `Skill "${skillName}" has no files array in the well-known index — cannot enumerate contents.`,
+				message: `Skill "${skill.name}" has no files array in the well-known index — cannot enumerate contents.`,
 			})
 		}
 
