@@ -1,6 +1,6 @@
 import { HttpClient } from "@effect/platform"
 import { Duration, Effect } from "effect"
-import { FetchFailed, InvalidArgument, NotFound } from "#/errors.js"
+import { FetchFailed, NotFound } from "#/errors.js"
 import type { ParsedUri } from "#/uri.js"
 import type { SkillSource } from "./source.js"
 
@@ -12,10 +12,6 @@ export const UrlSource: SkillSource = {
 		_options?: import("./source.js").SkillReadOptions,
 	) {
 		const url = uri.identifier
-
-		if (!url.endsWith(".md")) {
-			return yield* new InvalidArgument({ message: "URL must end with .md" })
-		}
 
 		const client = yield* HttpClient.HttpClient
 		const response = yield* client.get(url).pipe(

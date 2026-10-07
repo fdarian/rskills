@@ -29,12 +29,31 @@ function detectSubpath(segments: string[]): { identifier: string; subpath: Optio
 	return { identifier: segments.join("/"), subpath: Option.none() }
 }
 
+function parseHttps(uriString: string): Effect.Effect<ParsedUri, ParseFailed> {
+	return Effect.gen(function* () {
+		const url = yield* Effect.try({
+			try: () => new URL(uriString),
+			catch: (cause) => new ParseFailed({ message: `Invalid URL: "${uriString}"`, cause }),
+		})
+		if (url.pathname.endsWith(".md")) {
+			return { scheme: "https" as const, identifier: uriString, subpath: Option.none() }
+		}
+		// Non-.md URLs are skill hosts (as in `npx skills add https://host`), served via the well-known index.
+		const path = url.pathname.replace(/\/+$/, "")
+		return {
+			scheme: "well-known" as const,
+			identifier: `${url.origin}${path}`,
+			subpath: Option.none(),
+		}
+	})
+}
+
 export function parse(
 	uriString: string,
 ): Effect.Effect<ParsedUri, ParseFailed | UnsupportedScheme> {
 	return Effect.gen(function* () {
 		if (uriString.startsWith("https://")) {
-			return { scheme: "https" as const, identifier: uriString, subpath: Option.none() }
+			return yield* parseHttps(uriString)
 		}
 
 		const schemeSeparatorIndex = uriString.indexOf("://")

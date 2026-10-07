@@ -17,7 +17,8 @@ A Bun + Effect.ts CLI for reading remote [skills](https://agentskills.io/) witho
 | `skills-sh` | `<owner>/<repo>/<skill-path>` | ✓ (skills.sh API) | ✓ (5-step cascade: GitHub raw → skills.sh download → GitHub Trees API → unpkg → skills.sh page) | ✓ (GitHub Contents API, or the downloaded file set directly, against resolved root) |
 | `github` | `<owner>/<repo>/<path>` | — | ✓ (raw.githubusercontent.com) | ✓ (GitHub Contents API) |
 | `well-known` | `<host-or-base-url>` | ✓ (fetches `/.well-known/skills/index.json`) | ✓ | ✓ (derives from `files` array in index; `NotFound` if no `files`) |
-| `https` | full `https://…md` URL | — | ✓ (must end in `.md`) | — |
+| `https` | full `https://…/*.md` URL (pathname ends in `.md`) | — | ✓ | — |
+| `well-known` (via `https://`) | any other `https://host[/base]` URL | ✓ | ✓ | ✓ |
 | `claude` | `<skill-name>` (single segment) | — | ✓ (local filesystem) | ✓ |
 
 ## Subpath rules
@@ -28,7 +29,7 @@ The boundary between `identifier` and `subpath` is detected heuristically in `sr
 2. Else if the **last segment has a file extension** (`/\.\w+$/`), it's the subpath (handles top-level siblings like `pdf/reference.md`).
 3. Otherwise the whole path is the identifier and `SKILL.md` is fetched.
 
-`https://` URIs skip subpath detection — the URL is fetched as-is.
+`https://` URIs skip subpath detection. In `src/uri.ts`, a URL whose pathname ends in `.md` stays `https` and is fetched as-is; any other `https://` URL is rewritten to `well-known` with the normalized `origin + pathname` (trailing slash stripped, query/hash dropped) as the identifier, so `https://fframes.studio` resolves against `https://fframes.studio/.well-known/skills/index.json` (mirrors `npx skills add <url>`). Known gaps: the newer `/.well-known/agent-skills/index.json` path is not probed, and a bare `well-known://host.tld` (no path) mis-parses because `detectSubpath` treats `host.tld` as a file subpath — the `https://` form avoids this. Skill name is the last path segment of the identifier, as with any `well-known` URI; there is no separate skill-name/subpath after the host.
 
 ## claude local resolution
 
