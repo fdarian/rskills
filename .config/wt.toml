@@ -1,0 +1,2 @@
+[[post-start]]
+dev_data = "mkdir -p .data && mise trust --quiet"

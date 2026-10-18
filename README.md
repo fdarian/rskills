@@ -98,7 +98,7 @@ In the `search` picker, Enter on a result offers **Save to library** (or **Remov
 <details>
 <summary>Where it's stored</summary>
 
-One JSON file, at `$RSKILLS_LIBRARY`, else `$XDG_CONFIG_HOME/rskills/library.json`, else `~/.config/rskills/library.json`. It sits in the config directory so you can keep it in your dotfiles.
+One JSON file, at `$RSKILLS_DATA_DIR/library.json`, else `$XDG_CONFIG_HOME/rskills/library.json`, else `~/.config/rskills/library.json`. It sits in the config directory so you can keep it in your dotfiles.
 
 Each entry is a reference, not a copy of the skill: its name, the `source` (and `--skill`) you passed, the `description` from `SKILL.md` frontmatter at save time, tags, an optional note, and when it was added. Skill content is always fetched fresh by `read`, so re-run `lib add` to refresh the description. Local paths are saved as absolute paths.
 

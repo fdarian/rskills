@@ -30,9 +30,9 @@ const optionalEnv = (name: string) =>
 
 export const libraryPath = Effect.fn("libraryPath")(function* () {
 	const path = yield* Path.Path
-	const override = yield* optionalEnv("RSKILLS_LIBRARY")
-	if (Option.isSome(override)) {
-		return path.resolve(override.value)
+	const dataDir = yield* optionalEnv("RSKILLS_DATA_DIR")
+	if (Option.isSome(dataDir)) {
+		return path.join(path.resolve(dataDir.value), "library.json")
 	}
 	const xdg = yield* optionalEnv("XDG_CONFIG_HOME")
 	const configHome = Option.isSome(xdg) ? xdg.value : path.join(homedir(), ".config")

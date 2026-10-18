@@ -105,7 +105,7 @@ The shared Effect runtime is `src/runtime-layer.ts` (`runtimeLayer = Layer.merge
 
 `src/library/`: `store.ts` (path, `Schema`-validated load, atomic write) and `library.ts` (`addToLibrary`, `removeFromLibrary`, `searchLibrary`, `findSaved`). Commands are the `lib` sub-CLI in `src/cli.ts`.
 
-- **File**: `$RSKILLS_LIBRARY` → `$XDG_CONFIG_HOME/rskills/library.json` → `~/.config/rskills/library.json`; `{ version: 1, skills: Entry[] }`, tab-indented, sorted by name, written via `<path>.tmp` + rename. A missing file is an empty library; unreadable/invalid → `ParseFailed` with the path; write errors → `WriteFailed`.
+- **File**: `$RSKILLS_DATA_DIR/library.json` → `$XDG_CONFIG_HOME/rskills/library.json` → `~/.config/rskills/library.json`; `{ version: 1, skills: Entry[] }`, tab-indented, sorted by name, written via `<path>.tmp` + rename. A missing file is an empty library; unreadable/invalid → `ParseFailed` with the path; write errors → `WriteFailed`.
 - **Entry**: `{ name, source, skill?, description?, tags, note?, addedAt }`. A reference, never skill content. `source`/`skill` are stored as passed to `lib add` (so `read <source> [--skill]` resolves to it), except `Local` sources, stored as the absolute path. `description` is `SKILL.md` frontmatter at save time (`parseFrontmatterDescription`, incl. block scalars).
 - **Key**: `name`, case-insensitive. Defaults to frontmatter `name`, else the discovered skill's name; `--as` overrides.
 - **Add**: resolves via `resolveSkill` (`src/skills.ts`, the same path as `readSkill`) before writing, so bad/ambiguous sources fail without a save. New name → insert. Same name + same `source`/`skill` → update (description refreshed, tags unioned, note replaced only if given, `addedAt` kept). Same name, different target → `InvalidArgument` pointing at `--as`.
@@ -143,6 +143,8 @@ pnpm run build        # bundle to single node-runnable dist/cli.js
 pnpm run build:binaries  # compile standalone executables (--compile --bytecode) for darwin/linux
 bun run src/cli.ts read anthropics/skills@pdf
 ```
+
+`mise.toml` sets `RSKILLS_DATA_DIR` to `./.data` for dev runs, so the library stays out of your real `~/.config`; `.config/wt.toml` creates `.data` in new worktrees.
 
 CI runs `.github/workflows/check.yml`: format-and-commit first, then `pnpm run check`.
 
