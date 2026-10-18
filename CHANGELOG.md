@@ -1,5 +1,15 @@
 # rskills-cli
 
+## 0.4.0
+
+### Minor Changes
+
+- f9d60db: Add a personal skill library: `rskills lib add`, `lib rm` and `lib search` save skills as references (source, description, tags, note) in `~/.config/rskills/library.json` and search them later. The `search` picker can save and remove results and marks saved ones with a star.
+
+### Patch Changes
+
+- 4a4e4c1: Fix `rskills search` failing on skills.sh results from well-known sites (e.g. `ui-skills.com/<skill>`). They now appear as `host.tld@skill`, which `rskills read` accepts; unrecognised id shapes are skipped instead of failing the search.
+
 ## 0.3.0
 
 ### Minor Changes
