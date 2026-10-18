@@ -1,7 +1,8 @@
 import { parseSkillIdentifier } from "#/sources/skills-sh.js"
 
-/** Build the `npx skills add …` install command for an `owner/repo@skillId` identifier. */
+/** Build the `npx skills add …` install command for a search identifier. */
 export function getInstallCommand(identifier: string) {
 	const parsed = parseSkillIdentifier(identifier)
-	return `npx skills add ${parsed.source} --skill ${parsed.skillId}`
+	const source = parsed.source.includes("/") ? parsed.source : `https://${parsed.source}`
+	return `npx skills add ${source} --skill ${parsed.skillId}`
 }
