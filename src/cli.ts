@@ -1,6 +1,13 @@
 #!/usr/bin/env node
-import { Effect, Option } from "effect"
+import { Effect, type Layer, Option } from "effect"
 import { Cli, z } from "incur"
+import {
+	addToLibrary,
+	type LibraryEntry,
+	parseTags,
+	removeFromLibrary,
+	searchLibrary,
+} from "#/library/library.js"
 import { runtimeLayer } from "#/runtime-layer.js"
 import { listSkill, readSkill } from "#/skills.js"
 import { searchSkillsSh } from "#/sources/skills-sh.js"
@@ -11,6 +18,17 @@ const cli = Cli.create("rskills", {
 	description: packageJson.description,
 	version: packageJson.version,
 })
+
+async function runEffect<A, E>(
+	effect: Effect.Effect<A, E, Layer.Success<typeof runtimeLayer>>,
+): Promise<A> {
+	try {
+		return await Effect.runPromise(effect.pipe(Effect.provide(runtimeLayer)))
+	} catch (error) {
+		const message = error instanceof Error ? error.message : String(error)
+		throw new Error(message)
+	}
+}
 
 const sourceArg = z
 	.string()
@@ -43,12 +61,7 @@ cli.command("read", {
 			file: Option.fromNullishOr(c.options.file),
 			raw: c.options.raw === true,
 		})
-		try {
-			return await Effect.runPromise(effect.pipe(Effect.provide(runtimeLayer)))
-		} catch (error) {
-			const message = error instanceof Error ? error.message : String(error)
-			throw new Error(message)
-		}
+		return await runEffect(effect)
 	},
 })
 
@@ -105,12 +118,7 @@ cli.command("search", {
 					})),
 			}
 		})
-		try {
-			return await Effect.runPromise(effect.pipe(Effect.provide(runtimeLayer)))
-		} catch (error) {
-			const message = error instanceof Error ? error.message : String(error)
-			throw new Error(message)
-		}
+		return await runEffect(effect)
 	},
 })
 
@@ -135,14 +143,82 @@ cli.command("ls", {
 			skill: Option.fromNullishOr(c.options.skill),
 			file: Option.fromNullishOr(c.options.file),
 		}).pipe(Effect.map((entries) => ({ entries: [...entries] })))
-		try {
-			return await Effect.runPromise(effect.pipe(Effect.provide(runtimeLayer)))
-		} catch (error) {
-			const message = error instanceof Error ? error.message : String(error)
-			throw new Error(message)
-		}
+		return await runEffect(effect)
 	},
 })
+
+const entryOutput = z.object({
+	name: z.string(),
+	source: z.string(),
+	skill: z.string().optional(),
+	description: z.string().optional(),
+	tags: z.array(z.string()),
+	note: z.string().optional(),
+	addedAt: z.string(),
+})
+
+const toEntryOutput = (entry: LibraryEntry) => ({ ...entry, tags: [...entry.tags] })
+
+const lib = Cli.create("lib", { description: "Save skills to a personal library and search them" })
+
+lib.command("add", {
+	description: "Save a skill to the library",
+	args: z.object({ source: sourceArg }),
+	options: z.object({
+		skill: skillOption,
+		tags: z.string().optional().describe("Comma-separated tags, e.g. docs,pdf"),
+		note: z.string().optional().describe("Why you saved it"),
+		as: z.string().optional().describe("Library name (default: the skill's own name)"),
+	}),
+	output: entryOutput,
+	async run(c) {
+		const effect = addToLibrary({
+			source: c.args.source,
+			skill: Option.fromNullishOr(c.options.skill),
+			tags: parseTags(Option.fromNullishOr(c.options.tags)),
+			note: Option.fromNullishOr(c.options.note),
+			as: Option.fromNullishOr(c.options.as),
+		})
+		return await runEffect(effect.pipe(Effect.map(toEntryOutput)))
+	},
+})
+
+lib.command("rm", {
+	description: "Remove a skill from the library",
+	args: z.object({ name: z.string().describe("Library name") }),
+	output: z.object({ removed: entryOutput }),
+	async run(c) {
+		const effect = removeFromLibrary(c.args.name).pipe(
+			Effect.map((removed) => ({ removed: toEntryOutput(removed) })),
+		)
+		return await runEffect(effect)
+	},
+})
+
+lib.command("search", {
+	description: "Search the library (no query lists everything)",
+	args: z.object({
+		query: z
+			.string()
+			.optional()
+			.describe("Words matched against name, description, tags, note and source"),
+	}),
+	options: z.object({
+		tags: z.string().optional().describe("Comma-separated tags; entries must have all of them"),
+		limit: z.coerce.number().int().positive().default(20).describe("Result limit"),
+	}),
+	output: z.object({ results: z.array(entryOutput) }),
+	async run(c) {
+		const effect = searchLibrary({
+			query: Option.fromNullishOr(c.args.query),
+			tags: parseTags(Option.fromNullishOr(c.options.tags)),
+			limit: c.options.limit,
+		}).pipe(Effect.map((results) => ({ results: results.map(toEntryOutput) })))
+		return await runEffect(effect)
+	},
+})
+
+cli.command(lib)
 
 // Incur's serve() treats the first two argv tokens as runtime+script.
 // When run via `bun run src/cli.ts`, argv[0] is the script path and must be stripped.
