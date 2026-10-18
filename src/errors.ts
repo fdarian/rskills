@@ -14,8 +14,8 @@ export class ParseFailed extends Data.TaggedError("ParseFailed")<{
 	readonly cause?: unknown
 }> {}
 
-export class UnsupportedScheme extends Data.TaggedError("UnsupportedScheme")<{
-	readonly scheme: string
+export class UnsupportedSource extends Data.TaggedError("UnsupportedSource")<{
+	readonly message: string
 }> {}
 
 export class InvalidArgument extends Data.TaggedError("InvalidArgument")<{

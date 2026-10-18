@@ -1,5 +1,5 @@
 import type { CommandExecutor, FileSystem, HttpClient, Path } from "@effect/platform"
-import type { Effect } from "effect"
+import type { Effect, Option } from "effect"
 import type {
 	FetchFailed,
 	InvalidArgument,
@@ -7,9 +7,8 @@ import type {
 	NotFound,
 	ParseFailed,
 	RateLimited,
-} from "../errors.js"
-import type { ParsedUri } from "../uri.js"
-import type { SkillsShCache } from "./skills-sh-cache.js"
+} from "#/errors.js"
+import type { Source } from "#/source.js"
 
 export interface SkillSearchResult {
 	readonly scheme: string
@@ -27,29 +26,42 @@ export interface SkillReadOptions {
 	readonly raw?: boolean
 }
 
-export interface SkillSource {
-	readonly scheme: string
+export type SkillError =
+	| FetchFailed
+	| NotFound
+	| ParseFailed
+	| RateLimited
+	| InvalidArgument
+	| IsDirectory
+
+export type SkillEnv =
+	| HttpClient.HttpClient
+	| FileSystem.FileSystem
+	| Path.Path
+	| CommandExecutor.CommandExecutor
+
+/** A skill located inside a source. `read`/`list` are bound to wherever discovery found it. */
+export interface DiscoveredSkill {
+	readonly name: string
+	/** `file` is relative to the skill directory; none means `SKILL.md`. */
 	readonly read: (
-		uri: ParsedUri,
-		options?: SkillReadOptions,
-	) => Effect.Effect<
-		string,
-		FetchFailed | NotFound | ParseFailed | RateLimited | InvalidArgument | IsDirectory,
-		| HttpClient.HttpClient
-		| SkillsShCache
-		| FileSystem.FileSystem
-		| Path.Path
-		| CommandExecutor.CommandExecutor
-	>
-	readonly search?: (
-		query: string,
-		limit: number,
-	) => Effect.Effect<SkillSearchResult[], FetchFailed | ParseFailed, HttpClient.HttpClient>
-	readonly list?: (
-		uri: ParsedUri,
-	) => Effect.Effect<
-		ReadonlyArray<SkillEntry>,
-		FetchFailed | NotFound | ParseFailed | RateLimited | InvalidArgument,
-		HttpClient.HttpClient | SkillsShCache | FileSystem.FileSystem | Path.Path
-	>
+		file: Option.Option<string>,
+		options: SkillReadOptions,
+	) => Effect.Effect<string, SkillError, SkillEnv>
+	/** `dir` is relative to the skill directory; none means the skill directory itself. */
+	readonly list: (
+		dir: Option.Option<string>,
+	) => Effect.Effect<ReadonlyArray<SkillEntry>, SkillError, SkillEnv>
+}
+
+export interface SkillSource<S extends Source> {
+	/**
+	 * `selector` is a hint for providers that can avoid work when the caller
+	 * already knows which skill it wants; final name matching is done by the
+	 * caller (`selectSkill`).
+	 */
+	readonly discover: (
+		source: S,
+		selector: Option.Option<string>,
+	) => Effect.Effect<ReadonlyArray<DiscoveredSkill>, SkillError, SkillEnv>
 }

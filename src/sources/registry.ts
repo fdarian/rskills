@@ -1,122 +1,26 @@
-import type { CommandExecutor, FileSystem, HttpClient, Path } from "@effect/platform"
-import { Console, Effect } from "effect"
-import { stripFrontmatter } from "#/frontmatter.js"
-import {
-	type FetchFailed,
-	type InvalidArgument,
-	type IsDirectory,
-	type NotFound,
-	type ParseFailed,
-	type RateLimited,
-	UnsupportedScheme,
-} from "../errors.js"
-import type { ParsedUri } from "../uri.js"
+import type { Effect, Option } from "effect"
+import type { Source } from "#/source.js"
 import { ClaudeSource } from "./claude.js"
 import { GitHubSource } from "./github.js"
-import { SkillsShSource } from "./skills-sh.js"
-import type { SkillsShCache } from "./skills-sh-cache.js"
-import type { SkillEntry, SkillReadOptions, SkillSearchResult, SkillSource } from "./source.js"
+import { LocalSource } from "./local.js"
+import type { DiscoveredSkill, SkillEnv, SkillError } from "./source.js"
 import { UrlSource } from "./url.js"
 import { WellKnownSource } from "./well-known.js"
 
-const allSources: SkillSource[] = [
-	SkillsShSource,
-	WellKnownSource,
-	GitHubSource,
-	UrlSource,
-	ClaudeSource,
-]
-
-export function resolveSource(
-	scheme: string,
-): Effect.Effect<SkillSource, UnsupportedScheme, HttpClient.HttpClient> {
-	return Effect.gen(function* () {
-		const source = allSources.find((s) => s.scheme === scheme)
-		if (source === undefined) {
-			return yield* new UnsupportedScheme({ scheme })
-		}
-		return source
-	})
-}
-
-export function readFromUri(
-	uri: ParsedUri,
-	options?: SkillReadOptions,
-): Effect.Effect<
-	string,
-	| FetchFailed
-	| NotFound
-	| ParseFailed
-	| RateLimited
-	| InvalidArgument
-	| IsDirectory
-	| UnsupportedScheme,
-	| HttpClient.HttpClient
-	| SkillsShCache
-	| FileSystem.FileSystem
-	| Path.Path
-	| CommandExecutor.CommandExecutor
-> {
-	return Effect.gen(function* () {
-		const source = yield* resolveSource(uri.scheme)
-		const content = yield* source.read(uri, options)
-		if (options?.raw === true) {
-			return content
-		}
-		return stripFrontmatter(content)
-	})
-}
-
-export function listFromUri(
-	uri: ParsedUri,
-): Effect.Effect<
-	ReadonlyArray<SkillEntry>,
-	FetchFailed | NotFound | ParseFailed | RateLimited | InvalidArgument | UnsupportedScheme,
-	HttpClient.HttpClient | SkillsShCache | FileSystem.FileSystem | Path.Path
-> {
-	return Effect.gen(function* () {
-		const source = yield* resolveSource(uri.scheme)
-		if (source.list === undefined) {
-			return yield* Effect.fail(new UnsupportedScheme({ scheme: uri.scheme }))
-		}
-		return yield* source.list(uri)
-	})
-}
-
-export function looksLikeUrl(query: string): boolean {
-	return query.includes(".") || query.startsWith("http")
-}
-
-export function searchAll(
-	query: string,
-	limit: number,
-): Effect.Effect<SkillSearchResult[], never, HttpClient.HttpClient> {
-	return Effect.gen(function* () {
-		const searchables = allSources.filter((s) => {
-			if (s.search === undefined) {
-				return false
-			}
-			if (s.scheme === "well-known" && !looksLikeUrl(query)) {
-				return false
-			}
-			return true
-		})
-		const results = yield* Effect.all(
-			searchables.map((s) =>
-				Effect.gen(function* () {
-					if (s.search === undefined) {
-						return [] as SkillSearchResult[]
-					}
-					return yield* s.search(query, limit)
-				}).pipe(
-					Effect.tapError((error) =>
-						Console.error(`Search failed for source "${s.scheme}": ${error}`),
-					),
-					Effect.catchAll((_error) => Effect.succeed([] as SkillSearchResult[])),
-				),
-			),
-			{ concurrency: "unbounded" },
-		)
-		return results.flat()
-	})
+export function discoverSkills(
+	source: Source,
+	selector: Option.Option<string>,
+): Effect.Effect<ReadonlyArray<DiscoveredSkill>, SkillError, SkillEnv> {
+	switch (source._tag) {
+		case "GitHub":
+			return GitHubSource.discover(source, selector)
+		case "WellKnown":
+			return WellKnownSource.discover(source, selector)
+		case "Url":
+			return UrlSource.discover(source, selector)
+		case "Local":
+			return LocalSource.discover(source, selector)
+		case "Claude":
+			return ClaudeSource.discover(source, selector)
+	}
 }

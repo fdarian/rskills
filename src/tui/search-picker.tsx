@@ -1,11 +1,10 @@
-import { Effect, Fiber } from "effect"
+import { Effect, Fiber, Option } from "effect"
 import { Box, render, Text, useApp, useInput } from "ink"
 import { useEffect, useRef, useState } from "react"
 import { type AppRuntime, makeAppRuntime } from "#/runtime-layer.js"
-import { readFromUri } from "#/sources/registry.js"
-import { SkillsShSource } from "#/sources/skills-sh.js"
+import { readSkill } from "#/skills.js"
+import { searchSkillsSh } from "#/sources/skills-sh.js"
 import type { SkillSearchResult } from "#/sources/source.js"
-import { parse } from "#/uri.js"
 import { humanizeInstalls } from "./humanize.js"
 import { getInstallCommand } from "./install-command.js"
 import { copyToClipboard, openUrl } from "./system.js"
@@ -23,15 +22,6 @@ const ACTIONS = [
 
 type ActionKey = (typeof ACTIONS)[number]["key"]
 
-function searchSkills(query: string, limit: number) {
-	return Effect.gen(function* () {
-		if (SkillsShSource.search === undefined) {
-			return yield* Effect.dieMessage("skills-sh source does not implement search")
-		}
-		return yield* SkillsShSource.search(query, limit)
-	})
-}
-
 /** Derive the `owner/repo` identifier from a skills-sh id (`owner/repo/skillId`). */
 function deriveSource(identifier: string) {
 	const parts = identifier.split("/").filter((segment) => segment.length > 0)
@@ -39,6 +29,15 @@ function deriveSource(identifier: string) {
 		return `${parts[0]}/${parts[1]}`
 	}
 	return identifier
+}
+
+/** Convert a skills-sh id (`owner/repo/skillId`) to the `owner/repo@skillId` source form. */
+function toSkillSource(identifier: string) {
+	const parts = identifier.split("/").filter((segment) => segment.length > 0)
+	if (parts.length < 3) {
+		throw new Error(`Cannot derive skill coordinates from "${identifier}"`)
+	}
+	return `${parts[0]}/${parts[1]}@${parts.slice(2).join("/")}`
 }
 
 /** Index of the previous word boundary before `position` (skips trailing spaces, then a word). */
@@ -95,7 +94,7 @@ function SearchPicker(props: SearchPickerProps) {
 			if (fiberRef.current !== null) {
 				props.runtime.runFork(Fiber.interrupt(fiberRef.current))
 			}
-			const effect = searchSkills(query, props.limit).pipe(
+			const effect = searchSkillsSh(query, props.limit).pipe(
 				Effect.match({
 					onFailure: (error) => {
 						if (queryRef.current !== query) {
@@ -481,8 +480,12 @@ export async function runSearchPicker(options: {
 	if (outcome.kind === "read") {
 		const markdown = await runtime.runPromise(
 			Effect.gen(function* () {
-				const parsed = yield* parse(outcome.id)
-				return yield* readFromUri(parsed)
+				return yield* readSkill({
+					source: toSkillSource(outcome.id),
+					skill: Option.none(),
+					file: Option.none(),
+					raw: false,
+				})
 			}),
 		)
 		process.stdout.write(markdown.endsWith("\n") ? markdown : `${markdown}\n`)
