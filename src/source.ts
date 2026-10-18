@@ -12,7 +12,7 @@ export type Source =
 			readonly subpath: Option.Option<string>
 			readonly skill: Option.Option<string>
 	  }
-	| { readonly _tag: "WellKnown"; readonly baseUrl: string }
+	| { readonly _tag: "WellKnown"; readonly baseUrl: string; readonly skill: Option.Option<string> }
 	| { readonly _tag: "Url"; readonly url: string }
 	| { readonly _tag: "Local"; readonly path: string }
 	| { readonly _tag: "Claude"; readonly name: string }
@@ -102,9 +102,17 @@ function parseShorthand(input: string): Effect.Effect<Source, ParseFailed> {
 		const segments = location.split("/").filter((segment) => segment.length > 0)
 		const owner = segments[0]
 		const repo = segments[1]
+		// GitHub owners can't contain dots, so a lone `host.tld[@skill]` is a well-known site (the form skills.sh search returns).
+		if (segments.length === 1 && owner !== undefined && owner.includes(".")) {
+			return {
+				_tag: "WellKnown" as const,
+				baseUrl: `https://${owner}`,
+				skill: skill === undefined ? Option.none() : Option.some(skill),
+			}
+		}
 		if (owner === undefined || repo === undefined) {
 			return yield* new ParseFailed({
-				message: `Unrecognized source "${input}". Expected owner/repo[/path][@skill], a GitHub or site URL, a local path, or claude://<name>`,
+				message: `Unrecognized source "${input}". Expected owner/repo[/path][@skill], host.tld[@skill], a GitHub or site URL, a local path, or claude://<name>`,
 			})
 		}
 		return {
@@ -189,7 +197,7 @@ export function parseSource(
 				return { _tag: "Url" as const, url: input }
 			}
 			const path = url.pathname.replace(/\/+$/, "")
-			return { _tag: "WellKnown" as const, baseUrl: `${url.origin}${path}` }
+			return { _tag: "WellKnown" as const, baseUrl: `${url.origin}${path}`, skill: Option.none() }
 		}
 
 		if (!input.includes(":")) {
@@ -197,7 +205,7 @@ export function parseSource(
 		}
 
 		return yield* new ParseFailed({
-			message: `Unrecognized source "${input}". Expected owner/repo[/path][@skill], a GitHub or site URL, a local path, or claude://<name>`,
+			message: `Unrecognized source "${input}". Expected owner/repo[/path][@skill], host.tld[@skill], a GitHub or site URL, a local path, or claude://<name>`,
 		})
 	})
 }

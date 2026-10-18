@@ -9,7 +9,7 @@ A Bun + Effect.ts CLI for reading remote [skills](https://agentskills.io/) witho
 - `rskills read <source>[@skill] [--skill <name>] [--file <path>] [--raw]` — print a skill file (default `SKILL.md`) to stdout. Frontmatter is stripped; `--raw` returns the literal file, no envelope, in any `--format`. A directory `--file` exits non-zero with `IsDirectory` pointing to `rskills ls`.
 - `rskills ls <source>[@skill] [--skill <name>] [--file <dir>]` — structured `{ entries: [{ name, type }] }` (mirrors Anthropic's `ls`/`Glob`: `read` is files-only, `ls` is directories). On a multi-skill source with no selector it lists the skill names as `directory` entries instead of erroring.
 - `rskills lib add <source> [--skill <name>] [--tags a,b] [--note <text>] [--as <name>]` / `lib rm <name>` / `lib search [query] [--tags a,b] [--limit <n>]` — a personal library of saved skill references (see [Library](#library)). `add` returns the entry, `rm` `{ removed }`, `search` `{ results }`; `lib search` is never interactive.
-- `rskills search [query] [--limit <n>]` — skills.sh search only; results are `{ identifier: "owner/repo@skill", name, installs?, source }`. On an interactive terminal (stdin + stdout both TTY, no `--format`/`--json`/`--token-*`) opens a live Ink picker: type to search (debounced 250 ms, race-safe via Effect fiber interruption), ↑/↓ to navigate, Enter for an action menu (read SKILL.md / copy identifier / copy install command / open on skills.sh / save to or remove from the library), Esc to quit. Otherwise emits structured output (TOON by default); `query` is required there.
+- `rskills search [query] [--limit <n>]` — skills.sh search only; results are `{ identifier, name, installs?, source }` where `identifier` is `owner/repo@skill` or, for well-known sites, `host.tld@skill`; both feed straight into `rskills read`. skills.sh ids of any other shape are skipped, not fatal. On an interactive terminal (stdin + stdout both TTY, no `--format`/`--json`/`--token-*`) opens a live Ink picker: type to search (debounced 250 ms, race-safe via Effect fiber interruption), ↑/↓ to navigate, Enter for an action menu (read SKILL.md / copy identifier / copy install command / open on skills.sh / save to or remove from the library), Esc to quit. Otherwise emits structured output (TOON by default); `query` is required there.
 
 ## Source parsing
 
@@ -25,7 +25,7 @@ A Bun + Effect.ts CLI for reading remote [skills](https://agentskills.io/) witho
    - `gitlab.com`, `bitbucket.org`, any other `raw.githubusercontent.com` URL, or a `*.git` path → `UnsupportedSource`.
    - pathname ends in `.md` → `Url`, fetched as-is.
    - anything else → `WellKnown` with `origin + pathname` (trailing slash stripped, query/hash dropped), so `https://fframes.studio` works like `npx skills add <url>`.
-6. No `:` → GitHub shorthand `owner/repo[/sub/path][@skill]`.
+6. No `:` → a lone `host.tld[@skill]` segment (contains a dot; GitHub owners can't) is `WellKnown` with `https://host.tld`; otherwise GitHub shorthand `owner/repo[/sub/path][@skill]`.
 7. Otherwise `ParseFailed`.
 
 Subpaths containing `..` are rejected; `--file` goes through `normalizeRelativePath` (`src/sources/paths.ts`) which rejects absolute paths and `..`.
@@ -34,7 +34,7 @@ Subpaths containing `..` are rejected; `--file` goes through `normalizeRelativeP
 
 `src/skills.ts` (`readSkill` / `listSkill`) runs: `parseSource` → `resolveSelector` → `discoverSkills` → `selectSkill` → `skill.read` / `skill.list`.
 
-- Selector = `@skill` (GitHub shorthand only) merged with `--skill`; both given and different (case-insensitive) → `InvalidArgument`. `--skill` on `Url` / `Claude` sources → `InvalidArgument` (they are already one skill).
+- Selector = `@skill` (GitHub and `host.tld@skill` shorthand only) merged with `--skill`; both given and different (case-insensitive) → `InvalidArgument`. `--skill` on `Url` / `Claude` sources → `InvalidArgument` (they are already one skill).
 - Selector given: case-insensitive name match, else `NotFound` listing available names. No selector: exactly one skill is used; zero → `NotFound`; several → `InvalidArgument` listing names.
 - Only `ls` with no selector and no `--file` on a multi-skill source skips selection and lists the skills.
 

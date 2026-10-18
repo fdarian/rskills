@@ -8,7 +8,8 @@ export function resolveSelector(
 	source: Source,
 	option: Option.Option<string>,
 ): Effect.Effect<Option.Option<string>, InvalidArgument> {
-	const fromSource = source._tag === "GitHub" ? source.skill : Option.none()
+	const fromSource =
+		source._tag === "GitHub" || source._tag === "WellKnown" ? source.skill : Option.none()
 	if (Option.isSome(option) && (source._tag === "Url" || source._tag === "Claude")) {
 		return Effect.fail(
 			new InvalidArgument({
