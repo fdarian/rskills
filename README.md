@@ -12,81 +12,77 @@ npx rskills-cli <command>
 
 ## Usage
 
+`<source>` is anything `npx skills add <source>` accepts:
+
+| Source | Example |
+|---|---|
+| GitHub shorthand | `anthropics/skills`, `anthropics/skills/skills/pdf` |
+| GitHub URL | `https://github.com/anthropics/skills/tree/main/skills/pdf` |
+| Site with a [well-known skills index](https://github.com/vercel-labs/skills) | `https://fframes.studio` |
+| Local path | `./my-skills`, `~/skills/pdf` |
+| Single markdown file | `https://example.com/some/SKILL.md` |
+| Local Claude Code skill | `claude://my-skill` |
+
+A source can hold several skills. Pick one with `@skill` (GitHub shorthand) or `--skill <name>`; with exactly one skill in the source you can omit it.
+
 ### Read
 
 ```bash
-# Fetch SKILL.md (raw markdown to stdout)
-rskills read skills-sh://vercel-labs/json-render/json-render-react
-rskills read github://anthropics/skills/skills/pdf
-rskills read https://example.com/some/SKILL.md
+# One skill in the repo: no selector needed
+rskills read mickadesign/fluid-functionalism
 
-# Fetch a sub-resource (references, scripts, templates, assets, or any .md sibling)
-rskills read github://anthropics/skills/skills/pdf/reference.md
-rskills read skills-sh://vercel-labs/skills/references/foo.md
+# Several skills: pick one
+rskills read anthropics/skills@pdf
+rskills read anthropics/skills --skill pdf
+
+# Another file inside the skill
+rskills read anthropics/skills@pdf --file references/forms.md
+
 rskills read claude://my-skill
-rskills read claude://my-skill/references/api.md
-rskills read --raw claude://my-skill   # literal file, no preprocessing
+rskills read claude://my-skill --raw   # literal file, no preprocessing
 ```
+
+`read` strips YAML frontmatter and prints raw markdown to stdout. `--raw` returns the literal file. For `claude://` skills, inline `` !`shell` `` / ` ```! ` blocks are executed (respects `shell:` frontmatter and `disableSkillShellExecution` in settings) unless `--raw` is passed.
 
 ### List
 
 ```bash
-# List top-level entries of a skill
-rskills ls github://anthropics/skills/skills/xlsx
-rskills ls skills-sh://anthropics/skills/xlsx
-
-# List a subdirectory within a skill
-rskills ls github://anthropics/skills/skills/xlsx/scripts
-rskills ls skills-sh://anthropics/skills/xlsx/scripts
-rskills ls claude://my-skill
+rskills ls anthropics/skills                    # skills in the source
+rskills ls anthropics/skills@xlsx               # entries of one skill
+rskills ls anthropics/skills@xlsx --file scripts   # a subdirectory
 ```
 
-`ls` mirrors Anthropic's `ls`/`Glob` tools — it lists directory entries, while `read` fetches file content. Reading a directory path with `read` will error and suggest using `ls` instead.
+`ls` mirrors Anthropic's `ls`/`Glob` tools: it lists directory entries, while `read` fetches file content. Reading a directory with `read` exits non-zero and points you to `ls`.
 
 ### Search
 
-On an interactive terminal (no `--source`, `--format`, `--json`, or `--token-*`), `search` opens a live Ink picker: type to search, ↑/↓ to navigate, Enter for an action menu (read SKILL.md / copy identifier / copy install command / open on skills.sh), Esc to quit. Skills-sh only.
+Searches [skills.sh](https://skills.sh). On an interactive terminal (no `--format`, `--json`, or `--token-*`), `search` opens a live picker: type to search, ↑/↓ to navigate, Enter for an action menu (read SKILL.md / copy identifier / copy install command / open on skills.sh), Esc to quit.
 
 ```bash
-rskills search            # open interactive picker (TTY only)
-rskills search react      # pre-fill query in picker (TTY) or emit structured output (non-TTY)
-rskills search react --source skills-sh --limit 5
-rskills search https://mintlify.com/docs --source well-known
-rskills search react --limit 5 --format json   # structured output, skip picker
+rskills search                 # interactive picker (TTY only)
+rskills search react           # pre-fill the picker, or structured output when piped
+rskills search react --limit 5 --format json
 ```
 
-## URI format
+Results carry an `owner/repo@skill` identifier you can pass straight to `read` or `ls`.
 
-`<source>://<identifier>[/<subpath>]`
+<details>
+<summary>How skills are found</summary>
 
-| Source | Example | Search | Read | List |
-|---|---|---|---|---|
-| `skills-sh` | `skills-sh://vercel-labs/json-render/json-render-react` | ✓ | ✓ | ✓ |
-| `github` | `github://anthropics/skills/skills/pdf` | — | ✓ | ✓ |
-| `well-known` | `well-known://mintlify.com/docs` | ✓ | ✓ | ✓ (bare host lists skills; a skill requires `files` array in index) |
-| `https` | `https://example.com/SKILL.md` (path ends in `.md`) | — | ✓ | — |
-| `https` (other) | `https://mintlify.com/docs` — any non-`.md` `https://` URL is treated as `well-known` | ✓ | ✓ | ✓ |
-| `claude` | `claude://my-skill` | — | ✓ (local) | ✓ |
+- **GitHub**: one Git Trees API request lists the repo; a `SKILL.md` at the search root (the repo root or the path you gave) is the only skill, otherwise every `SKILL.md` below it is a skill named after its directory (skipping `node_modules`, `.git`, `dist`, `build`, `__pycache__`). If GitHub rate-limits you and you named a skill, the skills.sh copy is used instead.
+- **Site URLs**: `/.well-known/agent-skills/index.json` is tried first, then the legacy `/.well-known/skills/index.json`, under the given URL and then the site root.
+- **Local paths**: same discovery as GitHub, on disk.
+- **`claude://<name>`** resolves under `<cwd>/.claude/skills/` then `~/.claude/skills/` (first match wins).
+- GitLab, other git hosts, and `git@` / `ssh://` URLs are not supported yet.
 
-`well-known` looks for `/.well-known/agent-skills/index.json` first, then the legacy `/.well-known/skills/index.json`, under the given URL and then the site root.
-
-Local `claude` skills resolve under `<cwd>/.claude/skills/` then `~/.claude/skills/` (first match wins). By default, `read` strips YAML frontmatter and runs inline `` !`shell` `` / ` ```! ` blocks (respects `shell:` frontmatter and `disableSkillShellExecution` in settings). Use `read --raw` for the literal file.
-
-### Subpath detection
-
-No subpath → fetches `SKILL.md`. With a subpath, rskills detects the boundary heuristically:
-
-1. **Known subdir** (`references`, `scripts`, `templates`, `assets`, `SKILL.md`) — splits there
-2. **Extension on last segment** — that segment is the subpath
-3. Otherwise the whole path is the identifier
+</details>
 
 ## Output
 
 - `read` prints **raw markdown** to stdout regardless of `--format`. Pipe it anywhere.
-- `ls` prints structured `{ entries: [{ name, type }] }` — TOON by default, switchable with `--format json|yaml|md|jsonl`.
-- `search` opens an interactive live picker on a TTY; otherwise prints structured results (`{ identifier, name, installs?, source }`) — TOON by default, switchable with `--format json|yaml|md|jsonl`.
+- `ls` prints structured `{ entries: [{ name, type }] }`, TOON by default, switchable with `--format json|yaml|md|jsonl`.
+- `search` prints structured results (`{ identifier, name, installs?, source }`) when not interactive, in the same formats.
 - Errors exit with non-zero status and print a short message.
-- Reading a directory path with `read` exits non-zero with a message pointing to `rskills ls`.
 
 ## Built-ins from incur
 

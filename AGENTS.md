@@ -4,164 +4,101 @@ A Bun + Effect.ts CLI for reading remote [skills](https://agentskills.io/) witho
 
 ## What it does
 
-- `rskills read <uri>` — fetch a skill file and print markdown body content to stdout (frontmatter stripped by default; `--raw` returns the literal file, no envelope, in any `--format`). Reading a directory URI exits non-zero with an `IsDirectory` message pointing to `rskills ls`.
-- `rskills ls <uri>` — list entries in a skill directory; returns structured `{ entries: [{ name, type }] }` (mirrors Anthropic's `ls`/`Glob` tools — `read` is files-only, `ls` is directories)
-- `rskills search [query] [--source <name>] [--limit <n>]` — search skills. On an interactive terminal (stdin + stdout both TTY, no `--source`, no `--format`/`--json`/`--token-*`), opens a live Ink picker: type to search (debounced 250 ms, race-safe via Effect fiber interruption), ↑/↓ to navigate, Enter for an action menu (read SKILL.md / copy identifier / copy install command / open on skills.sh), Esc to quit. Skills-sh only in interactive mode. Otherwise (piped, `--format`, `--source`, etc.) emits structured output — TOON by default, switchable via `--format json|yaml|md|jsonl`; `query` is required in this mode.
+`<source>` is anything `npx skills add <source>` accepts (mirrors `vercel-labs/skills` `src/source-parser.ts`). A source may hold several skills; pick one with `@skill` or `--skill`, and a file inside it with `--file`.
 
-## URI scheme
+- `rskills read <source>[@skill] [--skill <name>] [--file <path>] [--raw]` — print a skill file (default `SKILL.md`) to stdout. Frontmatter is stripped; `--raw` returns the literal file, no envelope, in any `--format`. A directory `--file` exits non-zero with `IsDirectory` pointing to `rskills ls`.
+- `rskills ls <source>[@skill] [--skill <name>] [--file <dir>]` — structured `{ entries: [{ name, type }] }` (mirrors Anthropic's `ls`/`Glob`: `read` is files-only, `ls` is directories). On a multi-skill source with no selector it lists the skill names as `directory` entries instead of erroring.
+- `rskills search [query] [--limit <n>]` — skills.sh search only; results are `{ identifier: "owner/repo@skill", name, installs?, source }`. On an interactive terminal (stdin + stdout both TTY, no `--format`/`--json`/`--token-*`) opens a live Ink picker: type to search (debounced 250 ms, race-safe via Effect fiber interruption), ↑/↓ to navigate, Enter for an action menu (read SKILL.md / copy identifier / copy install command / open on skills.sh), Esc to quit. Otherwise emits structured output (TOON by default); `query` is required there.
 
-`<source>://<identifier>[/<subpath>]` — `<source>://` is optional; bare identifiers default to `skills-sh://`.
+## Source parsing
 
-| Source | Identifier | Search? | Read? | List? |
-|---|---|---|---|---|
-| `skills-sh` | `<owner>/<repo>/<skill-path>` | ✓ (skills.sh API) | ✓ (5-step cascade: GitHub raw → skills.sh download → GitHub Trees API → unpkg → skills.sh page) | ✓ (GitHub Contents API, or the downloaded file set directly, against resolved root) |
-| `github` | `<owner>/<repo>/<path>` | — | ✓ (raw.githubusercontent.com) | ✓ (GitHub Contents API) |
-| `well-known` | `<host-or-base-url>[/<skill-name>[/<subpath>]]` | ✓ (fetches the well-known index, see below) | ✓ | ✓ (bare host lists the index's skills; with a skill name, derives from its `files` array; `NotFound` if no `files`) |
-| `https` | full `https://…/*.md` URL (pathname ends in `.md`) | — | ✓ | — |
-| `well-known` (via `https://`) | any other `https://host[/base]` URL | ✓ | ✓ | ✓ |
-| `claude` | `<skill-name>` (single segment) | — | ✓ (local filesystem) | ✓ |
+`parseSource` (`src/source.ts`) turns the raw string into a `Source` tagged union (`GitHub | WellKnown | Url | Local | Claude`). First match wins:
 
-## Subpath rules
+1. `claude://<name>` — the only custom scheme; single segment.
+2. Local path (`/`, `./`, `../`, `.`, `..`, `~`, `~/`) — resolved to absolute, `~` via `os.homedir()`.
+3. `github:<x>` — recurse on `<x>`.
+4. `git@`, `ssh://`, `git://`, `git+…` — `UnsupportedSource`.
+5. `http(s)://`:
+   - `github.com` → `GitHub` (`/<o>/<r>`, `/tree/<ref>[/<path>]`; `.git` stripped). The first segment after `tree` is the ref, so refs containing `/` aren't supported.
+   - `raw.githubusercontent.com` with a `.md` pathname → `Url`.
+   - `gitlab.com`, `bitbucket.org`, any other `raw.githubusercontent.com` URL, or a `*.git` path → `UnsupportedSource`.
+   - pathname ends in `.md` → `Url`, fetched as-is.
+   - anything else → `WellKnown` with `origin + pathname` (trailing slash stripped, query/hash dropped), so `https://fframes.studio` works like `npx skills add <url>`.
+6. No `:` → GitHub shorthand `owner/repo[/sub/path][@skill]`.
+7. Otherwise `ParseFailed`.
 
-The boundary between `identifier` and `subpath` is detected heuristically in `src/uri.ts`:
+Subpaths containing `..` are rejected; `--file` goes through `normalizeRelativePath` (`src/sources/paths.ts`) which rejects absolute paths and `..`.
 
-1. If any segment matches `references | scripts | templates | assets | SKILL.md`, split there (handles `pdf/references/foo.md`).
-2. Else if the **last segment has a file extension** (`/\.\w+$/`), it's the subpath (handles top-level siblings like `pdf/reference.md`).
-3. Otherwise the whole path is the identifier and `SKILL.md` is fetched.
+## Skill selection
 
-`https://` URIs skip subpath detection. In `src/uri.ts`, a URL whose pathname ends in `.md` stays `https` and is fetched as-is; any other `https://` URL is rewritten to `well-known` with the normalized `origin + pathname` (trailing slash stripped, query/hash dropped) as the identifier, so `https://fframes.studio` behaves exactly like `well-known://fframes.studio` (mirrors `npx skills add <url>`). `detectSubpath` never treats a lone `well-known` host segment (`host.tld`) as a file subpath.
+`src/skills.ts` (`readSkill` / `listSkill`) runs: `parseSource` → `resolveSelector` → `discoverSkills` → `selectSkill` → `skill.read` / `skill.list`.
 
-## claude local resolution
+- Selector = `@skill` (GitHub shorthand only) merged with `--skill`; both given and different (case-insensitive) → `InvalidArgument`. `--skill` on `Url` / `Claude` sources → `InvalidArgument` (they are already one skill).
+- Selector given: case-insensitive name match, else `NotFound` listing available names. No selector: exactly one skill is used; zero → `NotFound`; several → `InvalidArgument` listing names.
+- Only `ls` with no selector and no `--file` on a multi-skill source skips selection and lists the skills.
 
-First non-HTTP source — reads via `@effect/platform` `FileSystem` + `Path` (Node layers in `cli.ts`), not `HttpClient`.
+## Providers
 
-Resolve `<skill-name>` against Claude Code skill roots in order; first existing path wins:
+Each provider in `src/sources/` exports a `SkillSource` (`src/sources/source.ts`); `registry.ts` dispatches on `Source._tag`.
 
-1. `<cwd>/.claude/skills/<name>/<subpath-or-SKILL.md>` (project, relative to process cwd)
-2. `~/.claude/skills/<name>/<subpath-or-SKILL.md>` (personal; `~` via `os.homedir()`)
+```ts
+interface DiscoveredSkill {
+  name: string
+  read(file: Option<string>, options: { raw?: boolean }): Effect<string, SkillError, SkillEnv>
+  list(dir: Option<string>): Effect<ReadonlyArray<SkillEntry>, SkillError, SkillEnv>
+}
+interface SkillSource<S extends Source> {
+  discover(source: S, selector: Option<string>): Effect<ReadonlyArray<DiscoveredSkill>, SkillError, SkillEnv>
+}
+```
 
-`NotFound` lists probed absolute paths. Plugin roots (`~/.claude/plugins/**/skills/`) and `claude://user/<name>` are deferred (see comment in `src/sources/claude.ts`).
+`discover` returns every skill the source holds; `read`/`list` are closures bound to wherever it found them, with paths relative to the skill directory. `selector` is only a hint to skip work — the caller does the final name match. `SkillSearchResult` (`{ scheme, identifier, name, installs? }`) lives in the same file; the CLI maps `scheme` → `source`.
 
-**Post-read processing**:
+To add a source: add a `Source` variant in `src/source.ts`, a provider in `src/sources/`, and a case in `registry.ts`. Reuse `file-set.ts` (skill held in memory) and `paths.ts` (`listFromFilePaths`, `isDirectoryOf`, `skillsFromDirectories`) so `IsDirectory` / `NotFound` behave the same everywhere.
 
-- YAML frontmatter stripping is global for all sources in `readFromUri` (`src/frontmatter.ts`); `read --raw` skips it and returns the literal file content.
-- `claude://` additionally preprocesses inline shell placeholders in `src/sources/claude-preprocess.ts`; its `shell` frontmatter field selects `bash` (default) or `powershell` for execution.
-- Execute inline `` !`cmd` `` (only when `!` is line-start or whitespace-prefixed; `KEY=!`cmd`` stays literal) and fenced ` ```! ` blocks; substitute stdout once (no re-scan). Non-zero exit still substitutes stdout.
-- Honor `disableSkillShellExecution: true` in `<cwd>/.claude/settings.json` or `~/.claude/settings.json` — commands become `[shell command execution disabled by policy]`.
+### GitHub (`github.ts`)
 
-## well-known index resolution
+One `GET api.github.com/repos/{o}/{r}/git/trees/{ref|HEAD}?recursive=1` gives every blob path; discovery and `ls` then run in memory, and `read` fetches `raw.githubusercontent.com/{o}/{r}/{ref}/{skillDir}/{file}`.
 
-`fetchIndex` in `src/sources/well-known.ts` copies the probe order of `vercel-labs/skills` (`src/providers/wellknown.ts`); first valid index wins:
+- Search root = subpath (or repo root). A `SKILL.md` directly at the root is the one skill (a subpath ending in `SKILL.md` is trimmed to its directory).
+- Otherwise every `SKILL.md` under the root, skipping `node_modules`, `.git`, `dist`, `build`, `__pycache__`. Skill name = directory basename; on a clash the shallowest wins. A truncated tree is searched as-is.
+- If the selector matches no directory name, candidates' `SKILL.md` frontmatter `name` is fetched and matched instead (`frontmatter.ts`).
+- Tree API 404 → `NotFound`, 403/429 → `RateLimited`.
+- **skills.sh download fallback** (`skills-sh-download.ts`): only on `RateLimited` *and* a selector. `GET https://skills.sh/api/download/{o}/{r}/{skill}` returns `{ files: [{ path, contents }] }` (skill-relative paths), served via `skillFromFileSet`. The endpoint is undocumented (found in `vercel-labs/skills` `src/blob.ts`), may serve a stale snapshot, and any non-200 or unparseable body yields `null`, surfacing the original `RateLimited`.
+
+### Well-known (`well-known.ts`)
+
+`fetchIndex` copies the probe order of `vercel-labs/skills` (`src/providers/wellknown.ts`); first valid index wins:
 
 1. `{base}/.well-known/agent-skills/index.json`
 2. `{origin}/.well-known/agent-skills/index.json` (only when the base has a path)
 3. `{base}/.well-known/skills/index.json` (legacy)
 4. `{origin}/.well-known/skills/index.json` (only when the base has a path)
 
-The matching root and well-known directory are carried with the index, so skill files are fetched from `{root}/{wellKnownPath}/{skill}/{file}`. Because of the origin fallback, `well-known://host/<skill-name>` works even though the skill name is part of the path. Only the `files[]` index model is supported; the v0.2.0 artifact (`url`/archive) entries are not. The skill name is the last path segment of the identifier; a bare host has none, so `ls` lists the index's skills and `read` fails with the available names.
+Skills = index entries (name from the entry, not the URL); files are fetched from `{root}/{wellKnownPath}/{skill}/{file}`. `ls` needs the entry's `files[]` (else `NotFound`). Only the `files[]` model is supported, not the v0.2.0 `url`/archive entries.
 
-## skills-sh resolution cascade
+### Local (`local.ts`) and Url (`url.ts`)
 
-`read` (and the `list`-supporting `resolveSkillsShRoot`) runs a 5-step cascade to locate a skill's SKILL.md:
+- `Local`: same discovery rules as GitHub but over `FileSystem` (root `SKILL.md`, else a recursive scan with the same skip list; symlink cycles guarded). Shared FS helpers in `local-fs.ts`.
+- `Url`: one skill named after the file; `--file` and `ls` → `InvalidArgument`.
 
-### Step 1 — GitHub raw probe
+### Claude (`claude.ts`)
 
-Probes 4 candidate raw roots in order:
-- `https://raw.githubusercontent.com/{owner}/{repo}/HEAD/{skillPath}/SKILL.md`
-- `…/skills/{skillPath}/SKILL.md`
-- `…/.agents/skills/{skillPath}/SKILL.md`
-- `…/.claude/skills/{skillPath}/SKILL.md`
+Reads via `@effect/platform` `FileSystem` + `Path`. `<name>` is looked up in `<cwd>/.claude/skills/<name>` then `~/.claude/skills/<name>`; first existing directory wins, and `NotFound` lists the probed paths. `--file` selects the file inside it. Plugin roots (`~/.claude/plugins/**/skills/`) and `claude://user/<name>` are not supported (see the comment in `claude.ts`).
 
-If all 4 return 404, probe the bare prefix blobs for `skills`, `.agents/skills`, and `.claude/skills`. A 200 raw response there is treated as a Git symlink target (guarded to a single-line path), then `/{target}/{skillPath}/SKILL.md` is probed. This handles repos where the public skills root is a symlink.
+Content goes through `claude-preprocess.ts` unless `--raw`:
 
-First 200 → resolved root cached as `{ _tag: "BaseUrl"; baseUrl: string }`. Subsequent reads append `/<subpathOrSKILL.md>`.
+- Executes inline `` !`cmd` `` (only when `!` is line-start or whitespace-prefixed; `KEY=!`cmd`` stays literal) and fenced ` ```! ` blocks; substitutes stdout once (no re-scan). Non-zero exit still substitutes stdout.
+- The skill's `shell` frontmatter field selects `bash` (default) or `powershell`.
+- `disableSkillShellExecution: true` in `<cwd>/.claude/settings.json` or `~/.claude/settings.json` turns commands into `[shell command execution disabled by policy]`.
 
-### Step 2 — skills.sh file-set download (`src/sources/skills-sh-download.ts`)
+YAML frontmatter stripping is applied to every source in `readSkill` (`src/frontmatter.ts`), not per provider.
 
-Triggered when step 1's 4 candidates (plus its symlink fallback) all 404. An undocumented, unauthenticated skills.sh endpoint returns a skill's entire file set in one request:
+## Search and TUI
 
-`GET https://skills.sh/api/download/{owner}/{repo}/{skillId}` → `{ "files": [{ "path": "SKILL.md", "contents": "..." }, ...] }`. `path` is skill-relative, not repo-relative.
+`searchSkillsSh` (`src/sources/skills-sh.ts`) calls the skills.sh search API; it is the only search backend. The picker is `src/tui/search-picker.tsx` (Ink/React), launched from `src/cli.ts`. Its read action goes through `readSkill`; the install command is built locally as `npx skills add owner/repo --skill <skill>`.
 
-It runs before the GitHub Trees API (step 3) because it needs only one request regardless of repo size, at the cost of possibly serving a stale skills.sh snapshot rather than live repo content. The endpoint is undocumented (found by reading `vercel-labs/skills`' `src/blob.ts`) and could disappear or change shape without notice — any non-200 status or unparseable body returns `null` and the cascade falls through to the Trees API.
-
-A match → resolved root cached as `{ _tag: "FileSet"; files: ReadonlyMap<string, string> }`. `read` looks up the requested subpath (default `SKILL.md`) directly in the map; a key that's a prefix of other keys but not itself a key raises `IsDirectory`. `list` derives entries from the map's keys at the requested depth — no further network calls for either.
-
-### Step 3 — GitHub Git Trees API discovery (`src/sources/github-tree.ts`)
-
-Triggered when step 2 also finds no match — no finite candidate list generalizes to arbitrary monorepo layouts (e.g. `trycua/cua` keeps skills at `libs/cua-driver/rust/Skills/cua-driver/SKILL.md`).
-
-1. Fetch `https://api.github.com/repos/{owner}/{repo}/git/trees/HEAD?recursive=1`.
-2. Suffix-match blob paths (case-insensitive) against `{skillPath}/SKILL.md`, including an exact match at repo root. Multiple matches resolve to the shortest (shallowest) path.
-3. A `truncated: true` response is searched as-is (not treated as authoritative) — no match there falls through to unpkg.
-
-A match → resolved root cached as `{ _tag: "BaseUrl"; baseUrl: "https://raw.githubusercontent.com/{owner}/{repo}/HEAD/{matchedDir}" }`, same shape as step 1's, so subpath reads and `ls` resolve off it identically. A 403 from the Trees API surfaces as `RateLimited`, matching the GitHub Contents API convention used elsewhere in this file (`fetchGitHubContents`).
-
-### Step 4 — unpkg fallback
-
-Triggered when step 3 also finds no match. Some skills ship SKILL.md only in their npm package (generated at build time), not in the GitHub repo.
-
-1. Fetch `https://raw.githubusercontent.com/{owner}/{repo}/HEAD/package.json`. If not 200 or not parseable, skip.
-2. Read `name` from the JSON.
-3. Probe `https://unpkg.com/{name}@latest/SKILL.md`. If 200, cache root as `{ _tag: "BaseUrl"; baseUrl: "https://unpkg.com/{name}@latest" }`.
-
-### Step 5 — skills.sh detail page (install command only)
-
-Triggered when unpkg also 404s. Fetches `https://www.skills.sh/{owner}/{repo}/{skillId}` and extracts the `npx skills add …` install command from the rendered HTML.
-
-**No SKILL.md content recovery**: skills.sh uses Next.js App Router — there is no `__NEXT_DATA__` blob and SKILL.md is rendered as HTML only, not embedded as raw markdown. Step 5 only provides the install command to include in the `NotFound` error message.
-
-### `ResolvedSkillRoot` type
-
-```ts
-type ResolvedSkillRoot =
-  | { readonly _tag: "BaseUrl"; readonly baseUrl: string }
-  | { readonly _tag: "FileSet"; readonly files: ReadonlyMap<string, string> }
-```
-
-Cached in `SkillsShCache` (`Ref<Map<string, ResolvedSkillRoot>>`). `BaseUrl` roots (steps 1, 3, 4) resolve a subpath by appending it to `baseUrl` and fetching. `FileSet` roots (step 2) serve every subpath directly from the cached map, with no further network calls.
-
-## Source plugin contract
-
-A source is a plain object implementing `SkillSource` (`src/sources/source.ts`):
-
-```ts
-interface SkillEntry {
-  name: string
-  type: "file" | "directory"
-}
-
-interface SkillSource {
-  scheme: string
-  read: (uri: ParsedUri) => Effect.Effect<
-    string,
-    FetchFailed | NotFound | ParseFailed | RateLimited | InvalidArgument | IsDirectory,
-    HttpClient.HttpClient | SkillsShCache | FileSystem.FileSystem | Path.Path | CommandExecutor.CommandExecutor
-  >
-  search?: (query: string, limit: number) => Effect.Effect<
-    SkillSearchResult[],
-    FetchFailed | ParseFailed,
-    HttpClient.HttpClient
-  >
-  list?: (uri: ParsedUri) => Effect.Effect<
-    ReadonlyArray<SkillEntry>,
-    FetchFailed | NotFound | ParseFailed | RateLimited | InvalidArgument,
-    HttpClient.HttpClient | SkillsShCache | FileSystem.FileSystem | Path.Path
-  >
-}
-```
-
-`list` is optional. Sources that don't implement it (e.g. `url`) cause `rskills ls` to exit with `"Source '<scheme>' does not support listing"`. When `read` is called on a path that turns out to be a directory, it must throw `IsDirectory` with a message suggesting `rskills ls`.
-
-`SkillSearchResult` shape: `{ scheme: string; identifier: string; name: string; installs?: number }`. The CLI maps `scheme` → `source` in output, so consumers see `{ identifier, name, installs?, source }`. There is no `description` field. `installs` is a real count from the skills.sh API; well-known results omit it.
-
-The interactive live picker (`src/tui/search-picker.tsx`, using Ink/React) is skills-sh-only and launched from `src/cli.ts` when TTY conditions are met. The shared Effect runtime is extracted to `src/runtime-layer.ts` (`runtimeLayer`, `makeAppRuntime`). Ink, React, and ink-text-input are devDependencies bundled into `dist/cli.js`.
-
-To add a new source:
-1. Create `src/sources/my-source.ts`
-2. Export a `SkillSource` object
-3. Register it in `src/sources/registry.ts` (`allSources` array)
-
-The runtime layer is defined in `src/runtime-layer.ts` (`runtimeLayer = Layer.mergeAll(FetchHttpClient.layer, SkillsShCacheLive, NodeContext.layer)`) — HTTP sources use `FetchHttpClient`; `claude` uses `NodeContext` from `@effect/platform-node` for `FileSystem` + `Path`. Merge additional services there as needed.
+The shared Effect runtime is `src/runtime-layer.ts` (`runtimeLayer = Layer.mergeAll(FetchHttpClient.layer, NodeContext.layer)`): HTTP providers use `HttpClient`, `Local`/`Claude` use `FileSystem` + `Path` + `CommandExecutor` from `NodeContext`. Ink, React, and ink-text-input are devDependencies bundled into `dist/cli.js`.
 
 ## Stack
 
@@ -178,7 +115,7 @@ The runtime layer is defined in `src/runtime-layer.ts` (`runtimeLayer = Layer.me
 
 - No destructuring of objects — `obj.foo`, not `const { foo } = obj`
 - No fake fallback values on error — throw tagged Effect errors and let the caller handle
-- No global mutable state — wrap caches in Effect `Ref` services (see `skills-sh-cache.ts`)
+- No global mutable state — if a cache is needed, wrap it in an Effect `Ref` service
 - `Effect.gen` for sequencing, `Effect.fn("Name")` for traced spans
 - `Effect.runPromise` only at the runtime edge (inside incur's `run` callbacks)
 
@@ -191,7 +128,7 @@ bun run check:lint   # biome check .
 bun run check        # CI baseline: type + lint
 bun run build        # bundle to single node-runnable dist/cli.js
 bun run build:binaries  # compile standalone executables (--compile --bytecode) for darwin/linux
-bun run src/cli.ts read github://anthropics/skills/skills/pdf
+bun run src/cli.ts read anthropics/skills@pdf
 ```
 
 CI runs `.github/workflows/check.yml`: format-and-commit first, then `bun run check`.

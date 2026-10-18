@@ -1,3 +1,5 @@
+import { Option } from "effect"
+
 export type FrontmatterParse = {
 	readonly body: string
 	readonly frontmatter: string | null
@@ -19,4 +21,15 @@ export function parseFrontmatter(content: string): FrontmatterParse {
 
 export function stripFrontmatter(content: string): string {
 	return parseFrontmatter(content).body
+}
+
+export function parseFrontmatterName(frontmatter: string): Option.Option<string> {
+	for (const line of frontmatter.split("\n")) {
+		const match = /^name:\s*(.+?)\s*$/.exec(line)
+		if (match?.[1] === undefined) {
+			continue
+		}
+		return Option.some(match[1].replace(/^(["'])(.*)\1$/, "$2"))
+	}
+	return Option.none()
 }

@@ -1,22 +1,10 @@
 import { HttpClient } from "@effect/platform"
 import { Duration, Effect, Option } from "effect"
 import { FetchFailed, IsDirectory, NotFound, ParseFailed } from "#/errors.js"
-import type { ParsedUri } from "#/uri.js"
-import { serialize } from "#/uri.js"
-import type { SkillEntry, SkillSearchResult, SkillSource } from "./source.js"
-
-function buildBaseUrl(identifier: string): string {
-	if (identifier.startsWith("http://") || identifier.startsWith("https://")) {
-		return identifier
-	}
-	return `https://${identifier}`
-}
-
-/** Last path segment of the identifier URL; undefined for a bare host. */
-function getSkillName(identifier: string): string | undefined {
-	const segments = new URL(buildBaseUrl(identifier)).pathname.split("/").filter((s) => s.length > 0)
-	return segments[segments.length - 1]
-}
+import type { SourceOf } from "#/source.js"
+import { fetchText } from "./http.js"
+import { isDirectoryOf, listFromFilePaths, normalizeRelativePath } from "./paths.js"
+import type { DiscoveredSkill, SkillSource } from "./source.js"
 
 // Order mirrors vercel-labs/skills (src/providers/wellknown.ts): agent-skills first, legacy skills second.
 const wellKnownPaths = [".well-known/agent-skills", ".well-known/skills"] as const
@@ -114,163 +102,45 @@ function fetchIndex(baseUrl: string) {
 	})
 }
 
-function fetchText(url: string) {
-	return Effect.gen(function* () {
-		const client = yield* HttpClient.HttpClient
-		const response = yield* client.get(url).pipe(
-			Effect.timeout(Duration.seconds(20)),
-			Effect.catchAll(
-				(error) =>
-					new FetchFailed({
-						message: `Failed to fetch ${url}`,
-						cause: error,
+export const WellKnownSource: SkillSource<SourceOf<"WellKnown">> = {
+	discover: Effect.fn("WellKnownSource.discover")(function* (source: SourceOf<"WellKnown">) {
+		const resolved = yield* fetchIndex(source.baseUrl)
+		return resolved.index.skills.map((entry): DiscoveredSkill => {
+			const skillUrl = (file: string) =>
+				`${resolved.baseUrl}/${resolved.wellKnownPath}/${entry.name}/${file}`
+			return {
+				name: entry.name,
+				read: (file) =>
+					Effect.gen(function* () {
+						const requested = yield* normalizeRelativePath(Option.getOrElse(file, () => "SKILL.md"))
+						if (
+							entry.files !== undefined &&
+							!entry.files.includes(requested) &&
+							isDirectoryOf(entry.files, requested)
+						) {
+							return yield* new IsDirectory({
+								message: `${requested} is a directory, not a file. Use 'rskills ls' to list its contents.`,
+							})
+						}
+						return yield* fetchText(skillUrl(requested))
 					}),
-			),
-		)
-
-		if (response.status === 404) {
-			return yield* new NotFound({
-				message: `Skill file not found at ${url}`,
-			})
-		}
-
-		if (response.status !== 200) {
-			return yield* new FetchFailed({
-				message: `Failed to fetch ${url}: HTTP ${response.status}`,
-				cause: response,
-			})
-		}
-
-		return yield* response.text.pipe(
-			Effect.catchAll(
-				(error) =>
-					new FetchFailed({
-						message: `Failed to read response body from ${url}`,
-						cause: error,
+				list: (dir) =>
+					Effect.gen(function* () {
+						if (entry.files === undefined) {
+							return yield* new NotFound({
+								message: `Skill "${entry.name}" has no files array in the well-known index — cannot enumerate contents.`,
+							})
+						}
+						const requested = yield* normalizeRelativePath(Option.getOrElse(dir, () => ""))
+						const entries = listFromFilePaths(entry.files, requested)
+						if (entries.length === 0) {
+							return yield* new NotFound({
+								message: `Directory not found in skill "${entry.name}": ${requested}`,
+							})
+						}
+						return entries
 					}),
-			),
-		)
-	})
-}
-
-function findSkill(uri: ParsedUri, resolved: ResolvedIndex) {
-	return Effect.gen(function* () {
-		const skillName = getSkillName(uri.identifier)
-		const skill = resolved.index.skills.find((s) => s.name === skillName)
-		if (skill === undefined) {
-			const available = resolved.index.skills.map((s) => s.name).join(", ")
-			return yield* new NotFound({
-				message: `Skill "${skillName ?? uri.identifier}" not found in well-known index at ${resolved.baseUrl}/${resolved.wellKnownPath}/index.json. Available: ${available}`,
-			})
-		}
-		return skill
-	})
-}
-
-export const WellKnownSource: SkillSource = {
-	scheme: "well-known",
-
-	read: Effect.fn("WellKnownSource.read")(function* (
-		uri: ParsedUri,
-		_options?: import("./source.js").SkillReadOptions,
-	) {
-		const resolved = yield* fetchIndex(buildBaseUrl(uri.identifier))
-		const skill = yield* findSkill(uri, resolved)
-
-		const subpathOrSkillMd = Option.isSome(uri.subpath) ? uri.subpath.value : "SKILL.md"
-
-		// Check if the requested path is a directory prefix in the files list
-		if (skill.files !== undefined) {
-			const requestedPath = subpathOrSkillMd
-			const isExactFile = skill.files.includes(requestedPath)
-			if (!isExactFile) {
-				const prefix = requestedPath.endsWith("/") ? requestedPath : `${requestedPath}/`
-				const isDirectoryPrefix = skill.files.some((f) => f.startsWith(prefix))
-				if (isDirectoryPrefix) {
-					return yield* new IsDirectory({
-						message: `${serialize(uri)} is a directory, not a file. Use 'rskills ls' to list its contents.`,
-					})
-				}
 			}
-		}
-
-		const fileUrl = `${resolved.baseUrl}/${resolved.wellKnownPath}/${skill.name}/${subpathOrSkillMd}`
-
-		return yield* fetchText(fileUrl)
-	}),
-
-	search: Effect.fn("WellKnownSource.search")(function* (query: string, limit: number) {
-		const resolved = yield* fetchIndex(buildBaseUrl(query)).pipe(
-			Effect.catchTag("NotFound", (error) =>
-				Effect.fail(
-					new FetchFailed({
-						message: error.message,
-						cause: error,
-					}),
-				),
-			),
-		)
-
-		const results = resolved.index.skills.slice(0, limit).map(
-			(skill): SkillSearchResult => ({
-				scheme: "well-known",
-				identifier: skill.name,
-				name: skill.name,
-			}),
-		)
-
-		return results
-	}),
-
-	list: Effect.fn("WellKnownSource.list")(function* (uri: ParsedUri) {
-		const resolved = yield* fetchIndex(buildBaseUrl(uri.identifier))
-
-		if (getSkillName(uri.identifier) === undefined) {
-			return resolved.index.skills.map((s): SkillEntry => ({ name: s.name, type: "directory" }))
-		}
-
-		const skill = yield* findSkill(uri, resolved)
-
-		if (skill.files === undefined) {
-			return yield* new NotFound({
-				message: `Skill "${skill.name}" has no files array in the well-known index — cannot enumerate contents.`,
-			})
-		}
-
-		const subpath = Option.isSome(uri.subpath) ? uri.subpath.value : undefined
-
-		// Filter files to those matching subpath prefix
-		let relevantFiles: string[]
-		if (subpath !== undefined) {
-			const prefix = subpath.endsWith("/") ? subpath : `${subpath}/`
-			relevantFiles = skill.files
-				.filter((f) => f.startsWith(prefix))
-				.map((f) => f.slice(prefix.length))
-		} else {
-			relevantFiles = skill.files
-		}
-
-		// Extract first segment and deduplicate
-		const seen = new Set<string>()
-		const entries: SkillEntry[] = []
-		for (const f of relevantFiles) {
-			const slashIndex = f.indexOf("/")
-			if (slashIndex === -1) {
-				// It's a file at this level
-				if (!seen.has(f)) {
-					seen.add(f)
-					entries.push({ name: f, type: "file" })
-				}
-			} else {
-				// There's a subdirectory
-				const dirName = f.slice(0, slashIndex)
-				if (!seen.has(dirName)) {
-					seen.add(dirName)
-					entries.push({ name: dirName, type: "directory" })
-				}
-			}
-		}
-
-		return entries
+		})
 	}),
 }

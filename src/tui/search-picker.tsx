@@ -1,11 +1,10 @@
-import { Effect, Fiber } from "effect"
+import { Effect, Fiber, Option } from "effect"
 import { Box, render, Text, useApp, useInput } from "ink"
 import { useEffect, useRef, useState } from "react"
 import { type AppRuntime, makeAppRuntime } from "#/runtime-layer.js"
-import { readFromUri } from "#/sources/registry.js"
-import { SkillsShSource } from "#/sources/skills-sh.js"
+import { readSkill } from "#/skills.js"
+import { parseSkillIdentifier, searchSkillsSh } from "#/sources/skills-sh.js"
 import type { SkillSearchResult } from "#/sources/source.js"
-import { parse } from "#/uri.js"
 import { humanizeInstalls } from "./humanize.js"
 import { getInstallCommand } from "./install-command.js"
 import { copyToClipboard, openUrl } from "./system.js"
@@ -23,22 +22,8 @@ const ACTIONS = [
 
 type ActionKey = (typeof ACTIONS)[number]["key"]
 
-function searchSkills(query: string, limit: number) {
-	return Effect.gen(function* () {
-		if (SkillsShSource.search === undefined) {
-			return yield* Effect.dieMessage("skills-sh source does not implement search")
-		}
-		return yield* SkillsShSource.search(query, limit)
-	})
-}
-
-/** Derive the `owner/repo` identifier from a skills-sh id (`owner/repo/skillId`). */
 function deriveSource(identifier: string) {
-	const parts = identifier.split("/").filter((segment) => segment.length > 0)
-	if (parts.length >= 2) {
-		return `${parts[0]}/${parts[1]}`
-	}
-	return identifier
+	return parseSkillIdentifier(identifier).source
 }
 
 /** Index of the previous word boundary before `position` (skips trailing spaces, then a word). */
@@ -95,7 +80,7 @@ function SearchPicker(props: SearchPickerProps) {
 			if (fiberRef.current !== null) {
 				props.runtime.runFork(Fiber.interrupt(fiberRef.current))
 			}
-			const effect = searchSkills(query, props.limit).pipe(
+			const effect = searchSkillsSh(query, props.limit).pipe(
 				Effect.match({
 					onFailure: (error) => {
 						if (queryRef.current !== query) {
@@ -175,9 +160,10 @@ function SearchPicker(props: SearchPickerProps) {
 		}
 
 		if (actionKey === "copy-install") {
-			setFeedback("Fetching install command…")
-			const effect = getInstallCommand(selected.identifier).pipe(
-				Effect.flatMap((command) => copyToClipboard(command).pipe(Effect.as(command))),
+			const command = getInstallCommand(selected.identifier)
+			setFeedback("Copying install command…")
+			const effect = copyToClipboard(command).pipe(
+				Effect.as(command),
 				Effect.match({
 					onFailure: (error) => `Copy install failed: ${error.message}`,
 					onSuccess: (command) => `Copied install command: ${command}`,
@@ -187,7 +173,8 @@ function SearchPicker(props: SearchPickerProps) {
 			return
 		}
 
-		const url = `https://www.skills.sh/${selected.identifier}`
+		const parsed = parseSkillIdentifier(selected.identifier)
+		const url = `https://www.skills.sh/${parsed.source}/${parsed.skillId}`
 		setFeedback(`Opening ${url}…`)
 		const effect = openUrl(url).pipe(
 			Effect.match({
@@ -481,8 +468,12 @@ export async function runSearchPicker(options: {
 	if (outcome.kind === "read") {
 		const markdown = await runtime.runPromise(
 			Effect.gen(function* () {
-				const parsed = yield* parse(outcome.id)
-				return yield* readFromUri(parsed)
+				return yield* readSkill({
+					source: outcome.id,
+					skill: Option.none(),
+					file: Option.none(),
+					raw: false,
+				})
 			}),
 		)
 		process.stdout.write(markdown.endsWith("\n") ? markdown : `${markdown}\n`)

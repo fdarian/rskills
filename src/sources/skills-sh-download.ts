@@ -39,13 +39,11 @@ function parseDownloadFiles(json: unknown): ReadonlyMap<string, string> | null {
 }
 
 /**
- * Step 2 of the skills-sh read cascade: an undocumented but unauthenticated
- * skills.sh endpoint (`GET /api/download/{owner}/{repo}/{skillId}`) that
- * returns a skill's entire file set — skill-relative path -> contents — in
- * one request. This is a possibly-stale skills.sh snapshot and a much larger
- * payload than the step 1 raw probe, so it's only tried after that misses.
- * Returns null on any non-200 status or unparseable body so the cascade
- * falls through to the GitHub Trees API.
+ * Undocumented but unauthenticated skills.sh endpoint
+ * (`GET /api/download/{owner}/{repo}/{skillId}`) returning a skill's entire
+ * file set — skill-relative path -> contents — in one request. Possibly a
+ * stale snapshot, so it is only the fallback when the GitHub Trees API is
+ * rate limited. Returns null on any non-200 status or unparseable body.
  */
 export const fetchSkillsShDownload = Effect.fn("fetchSkillsShDownload")(
 	(

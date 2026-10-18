@@ -1,16 +1,10 @@
 #!/usr/bin/env node
-import { Effect } from "effect"
+import { Effect, Option } from "effect"
 import { Cli, z } from "incur"
 import { runtimeLayer } from "#/runtime-layer.js"
-import {
-	listFromUri,
-	looksLikeUrl,
-	readFromUri,
-	resolveSource,
-	searchAll,
-} from "#/sources/registry.js"
+import { listSkill, readSkill } from "#/skills.js"
+import { searchSkillsSh } from "#/sources/skills-sh.js"
 import { runSearchPicker } from "#/tui/search-picker.js"
-import { parse } from "#/uri.js"
 import packageJson from "../package.json" with { type: "json" }
 
 const cli = Cli.create("rskills", {
@@ -18,14 +12,22 @@ const cli = Cli.create("rskills", {
 	version: packageJson.version,
 })
 
+const sourceArg = z
+	.string()
+	.describe(
+		"owner/repo[/path][@skill], a GitHub URL, a site URL (well-known index), a local path, or claude://<name>",
+	)
+const skillOption = z.string().optional().describe("Skill name, when the source contains several")
+
 cli.command("read", {
 	description: "Fetch a skill file and print to stdout",
-	args: z.object({
-		uri: z
-			.string()
-			.describe("URI to read (e.g. owner/repo/skill, github://owner/repo/path, or https://...)"),
-	}),
+	args: z.object({ source: sourceArg }),
 	options: z.object({
+		skill: skillOption,
+		file: z
+			.string()
+			.optional()
+			.describe("File inside the skill to read (default SKILL.md), e.g. references/foo.md"),
 		raw: z
 			.boolean()
 			.optional()
@@ -35,10 +37,11 @@ cli.command("read", {
 	}),
 	output: z.string(),
 	async run(c) {
-		const effect = Effect.gen(function* () {
-			const parsed = yield* parse(c.args.uri)
-			const readOptions = c.options.raw === true ? { raw: true } : undefined
-			return yield* readFromUri(parsed, readOptions)
+		const effect = readSkill({
+			source: c.args.source,
+			skill: Option.fromNullable(c.options.skill),
+			file: Option.fromNullable(c.options.file),
+			raw: c.options.raw === true,
 		})
 		try {
 			return await Effect.runPromise(effect.pipe(Effect.provide(runtimeLayer)))
@@ -55,7 +58,6 @@ cli.command("search", {
 		query: z.string().optional().describe("Search query"),
 	}),
 	options: z.object({
-		source: z.string().optional().describe("Source name"),
 		limit: z.coerce.number().default(10).describe("Result limit"),
 	}),
 	output: z.object({
@@ -71,7 +73,6 @@ cli.command("search", {
 	async run(c) {
 		const query = c.args.query
 		const limit = c.options.limit
-		const sourceName = c.options.source
 
 		const formatRequested =
 			c.formatExplicit === true ||
@@ -79,10 +80,7 @@ cli.command("search", {
 				(arg) => arg === "--json" || arg === "--format" || arg.startsWith("--format="),
 			)
 		const interactive =
-			process.stdin.isTTY === true &&
-			process.stdout.isTTY === true &&
-			sourceName === undefined &&
-			!formatRequested
+			process.stdin.isTTY === true && process.stdout.isTTY === true && !formatRequested
 
 		if (interactive) {
 			await runSearchPicker({ initialQuery: query ?? "", limit })
@@ -94,19 +92,7 @@ cli.command("search", {
 		}
 
 		const effect = Effect.gen(function* () {
-			let results: Array<import("#/sources/source.js").SkillSearchResult>
-			if (sourceName !== undefined) {
-				if (sourceName === "well-known" && !looksLikeUrl(query)) {
-					throw new Error("well-known search requires a URL or host as the query")
-				}
-				const source = yield* resolveSource(sourceName)
-				if (source.search === undefined) {
-					throw new Error(`Source "${sourceName}" does not support search`)
-				}
-				results = yield* source.search(query, limit)
-			} else {
-				results = yield* searchAll(query, limit)
-			}
+			const results = yield* searchSkillsSh(query, limit)
 			return {
 				results: results
 					.slice()
@@ -130,12 +116,10 @@ cli.command("search", {
 
 cli.command("ls", {
 	description: "List entries in a skill directory",
-	args: z.object({
-		uri: z
-			.string()
-			.describe(
-				"URI to list (e.g. owner/repo/skill, github://owner/repo/path, or skills-sh://...)",
-			),
+	args: z.object({ source: sourceArg }),
+	options: z.object({
+		skill: skillOption,
+		file: z.string().optional().describe("Directory inside the skill to list, e.g. references"),
 	}),
 	output: z.object({
 		entries: z.array(
@@ -146,15 +130,11 @@ cli.command("ls", {
 		),
 	}),
 	async run(c) {
-		const effect = Effect.gen(function* () {
-			const parsed = yield* parse(c.args.uri)
-			const source = yield* resolveSource(parsed.scheme)
-			if (source.list === undefined) {
-				return yield* Effect.fail(new Error(`Source '${parsed.scheme}' does not support listing`))
-			}
-			const entries = yield* listFromUri(parsed)
-			return { entries: entries as Array<{ name: string; type: "file" | "directory" }> }
-		})
+		const effect = listSkill({
+			source: c.args.source,
+			skill: Option.fromNullable(c.options.skill),
+			file: Option.fromNullable(c.options.file),
+		}).pipe(Effect.map((entries) => ({ entries: [...entries] })))
 		try {
 			return await Effect.runPromise(effect.pipe(Effect.provide(runtimeLayer)))
 		} catch (error) {
