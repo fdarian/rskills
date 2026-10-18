@@ -19,19 +19,35 @@ export interface ListSkillRequest {
 	readonly file: Option.Option<string>
 }
 
-export const readSkill = Effect.fn("readSkill")(function* (request: ReadSkillRequest) {
-	const source = yield* parseSource(request.source)
-	const selector = yield* resolveSelector(source, request.skill)
+const locateSkills = Effect.fn("locateSkills")(function* (
+	rawSource: string,
+	skillOption: Option.Option<string>,
+) {
+	const source = yield* parseSource(rawSource)
+	const selector = yield* resolveSelector(source, skillOption)
 	const skills = yield* discoverSkills(source, selector)
-	const skill = yield* selectSkill(skills, selector)
+	return { selector, skills }
+})
+
+/** Resolves a raw source plus optional `--skill` to exactly one skill, or fails. */
+export const resolveSkill = Effect.fn("resolveSkill")(function* (
+	rawSource: string,
+	skillOption: Option.Option<string>,
+) {
+	const located = yield* locateSkills(rawSource, skillOption)
+	return yield* selectSkill(located.skills, located.selector)
+})
+
+export const readSkill = Effect.fn("readSkill")(function* (request: ReadSkillRequest) {
+	const skill = yield* resolveSkill(request.source, request.skill)
 	const content = yield* skill.read(request.file, { raw: request.raw })
 	return request.raw ? content : stripFrontmatter(content)
 })
 
 export const listSkill = Effect.fn("listSkill")(function* (request: ListSkillRequest) {
-	const source = yield* parseSource(request.source)
-	const selector = yield* resolveSelector(source, request.skill)
-	const skills = yield* discoverSkills(source, selector)
+	const located = yield* locateSkills(request.source, request.skill)
+	const selector = located.selector
+	const skills = located.skills
 	// Unlike `read`, listing a multi-skill source is meaningful: show which skills it holds.
 	if (Option.isNone(selector) && Option.isNone(request.file) && skills.length > 1) {
 		return skills.map((skill): SkillEntry => ({ name: skill.name, type: "directory" }))
