@@ -1,6 +1,5 @@
 import { homedir } from "node:os"
-import { Path } from "@effect/platform"
-import { Effect } from "effect"
+import { Effect, Path } from "effect"
 import { NotFound } from "#/errors.js"
 import type { SourceOf } from "#/source.js"
 import { preprocessClaudeSkillContent } from "./claude-preprocess.js"

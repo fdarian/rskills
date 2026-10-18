@@ -1,6 +1,6 @@
 import { homedir } from "node:os"
-import { Command, CommandExecutor, FileSystem, Path } from "@effect/platform"
-import { Effect } from "effect"
+import { Effect, FileSystem, Path } from "effect"
+import { ChildProcess, ChildProcessSpawner } from "effect/process"
 import { FetchFailed } from "#/errors.js"
 import { parseFrontmatter } from "#/frontmatter.js"
 import type { SkillReadOptions } from "./source.js"
@@ -131,18 +131,18 @@ function collectPlaceholders(body: string): ReadonlyArray<PlaceholderSpan> {
 	return spans
 }
 
-function shellCommand(shell: ClaudeShell, script: string): Command.Command {
+function shellCommand(shell: ClaudeShell, script: string): ChildProcess.Command {
 	if (shell === "powershell") {
-		return Command.make("pwsh", "-NoProfile", "-Command", script)
+		return ChildProcess.make("pwsh", ["-NoProfile", "-Command", script])
 	}
-	return Command.make("bash", "-c", script)
+	return ChildProcess.make("bash", ["-c", script])
 }
 
 const runShellScript = Effect.fn("claude-preprocess.runShellScript")(function* (
 	shell: ClaudeShell,
 	script: string,
 ) {
-	const executor = yield* CommandExecutor.CommandExecutor
+	const executor = yield* ChildProcessSpawner.ChildProcessSpawner
 	const cmd = shellCommand(shell, script)
 	return yield* executor.string(cmd).pipe(
 		Effect.mapError(
@@ -164,15 +164,13 @@ export const isShellExecutionDisabled = Effect.fn("claude-preprocess.isShellExec
 			path.join(homedir(), ".claude", "settings.json"),
 		]
 		for (const settingsPath of settingsPaths) {
-			const exists = yield* fs
-				.exists(settingsPath)
-				.pipe(Effect.catchAll(() => Effect.succeed(false)))
+			const exists = yield* fs.exists(settingsPath).pipe(Effect.catch(() => Effect.succeed(false)))
 			if (!exists) {
 				continue
 			}
 			const text = yield* fs
 				.readFileString(settingsPath)
-				.pipe(Effect.catchAll(() => Effect.succeed(null)))
+				.pipe(Effect.catch(() => Effect.succeed(null)))
 			if (text === null) {
 				continue
 			}

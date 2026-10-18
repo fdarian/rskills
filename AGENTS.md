@@ -84,7 +84,7 @@ Skills = index entries (name from the entry, not the URL); files are fetched fro
 
 ### Claude (`claude.ts`)
 
-Reads via `@effect/platform` `FileSystem` + `Path`. `<name>` is looked up in `<cwd>/.claude/skills/<name>` then `~/.claude/skills/<name>`; first existing directory wins, and `NotFound` lists the probed paths. `--file` selects the file inside it. Plugin roots (`~/.claude/plugins/**/skills/`) and `claude://user/<name>` are not supported (see the comment in `claude.ts`).
+Reads via `effect` `FileSystem` + `Path`. `<name>` is looked up in `<cwd>/.claude/skills/<name>` then `~/.claude/skills/<name>`; first existing directory wins, and `NotFound` lists the probed paths. `--file` selects the file inside it. Plugin roots (`~/.claude/plugins/**/skills/`) and `claude://user/<name>` are not supported (see the comment in `claude.ts`).
 
 Content goes through `claude-preprocess.ts` unless `--raw`:
 
@@ -98,16 +98,16 @@ YAML frontmatter stripping is applied to every source in `readSkill` (`src/front
 
 `searchSkillsSh` (`src/sources/skills-sh.ts`) calls the skills.sh search API; it is the only search backend. The picker is `src/tui/search-picker.tsx` (Ink/React), launched from `src/cli.ts`. Its read action goes through `readSkill`; the install command is built locally as `npx skills add owner/repo --skill <skill>`.
 
-The shared Effect runtime is `src/runtime-layer.ts` (`runtimeLayer = Layer.mergeAll(FetchHttpClient.layer, NodeContext.layer)`): HTTP providers use `HttpClient`, `Local`/`Claude` use `FileSystem` + `Path` + `CommandExecutor` from `NodeContext`. Ink, React, and ink-text-input are devDependencies bundled into `dist/cli.js`.
+The shared Effect runtime is `src/runtime-layer.ts` (`runtimeLayer = Layer.mergeAll(FetchHttpClient.layer, NodeServices.layer)`): HTTP providers use `HttpClient`, `Local`/`Claude` and the TUI use `FileSystem` + `Path` + `ChildProcessSpawner` (`effect/process`) from `NodeServices`. Ink, React, and ink-text-input are devDependencies bundled into `dist/cli.js`.
 
 ## Stack
 
 - **pnpm** — package manager (`packageManager` in `package.json`)
 - **Bun** — script runtime + bundler (`Bun.build`, standalone binaries)
 - **incur** — CLI surface (zod schemas, structured output, TOON default). [Notes on incur](#incur-quirks) below.
-- **Effect.ts** — services, tagged errors, runtime composition
-- **`@effect/platform-node`** — portable Node runtime services (`NodeContext`) for filesystem, path, and command execution
-- **`@effect/platform` `HttpClient`** — all HTTP goes through this
+- **Effect.ts v4** — services, tagged errors, runtime composition
+- **`@effect/platform-node`** — portable Node runtime services (`NodeServices`) for filesystem, path, and child processes
+- **`effect/http` `HttpClient`** — all HTTP goes through this
 - **Biome** — format + lint
 - **TypeScript strict**, path alias `#/*` → `src/*`
 - **Published artifact** — single bundled `dist/cli.js` that runs under Node; npm ships `dist/`, and runtime libraries are build-time `devDependencies` because Bun bundles them into the output

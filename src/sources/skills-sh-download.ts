@@ -1,5 +1,5 @@
-import { HttpClient } from "@effect/platform"
 import { Duration, Effect } from "effect"
+import { HttpClient } from "effect/http"
 import { FetchFailed } from "#/errors.js"
 
 type SkillsShDownloadFile = {
@@ -56,7 +56,7 @@ export const fetchSkillsShDownload = Effect.fn("fetchSkillsShDownload")(
 			const client = yield* HttpClient.HttpClient
 			const response = yield* client.get(url).pipe(
 				Effect.timeout(Duration.seconds(20)),
-				Effect.catchAll(
+				Effect.catch(
 					(error) =>
 						new FetchFailed({
 							message: `Failed to fetch ${url}`,
@@ -69,7 +69,7 @@ export const fetchSkillsShDownload = Effect.fn("fetchSkillsShDownload")(
 				return null
 			}
 
-			const json = yield* response.json.pipe(Effect.catchAll(() => Effect.succeed(null)))
+			const json = yield* response.json.pipe(Effect.catch(() => Effect.succeed(null)))
 
 			return parseDownloadFiles(json)
 		}),

@@ -1,5 +1,5 @@
-import { HttpClient, HttpClientRequest } from "@effect/platform"
 import { Duration, Effect } from "effect"
+import { HttpClient, HttpClientRequest } from "effect/http"
 import { FetchFailed, ParseFailed } from "#/errors.js"
 import type { SkillSearchResult } from "./source.js"
 
@@ -41,7 +41,7 @@ export const searchSkillsSh = Effect.fn("searchSkillsSh")(function* (query: stri
 		})
 		.pipe(
 			Effect.timeout(Duration.seconds(20)),
-			Effect.catchAll(
+			Effect.catch(
 				(error) =>
 					new FetchFailed({
 						message: "Search request failed",
@@ -58,7 +58,7 @@ export const searchSkillsSh = Effect.fn("searchSkillsSh")(function* (query: stri
 	}
 
 	const json = yield* response.json.pipe(
-		Effect.catchAll(
+		Effect.catch(
 			(error) =>
 				new ParseFailed({
 					message: "Failed to parse search response JSON",

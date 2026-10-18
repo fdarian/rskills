@@ -1,5 +1,4 @@
-import { FileSystem, Path } from "@effect/platform"
-import { Effect, Option } from "effect"
+import { Effect, FileSystem, Option, Path } from "effect"
 import { FetchFailed, IsDirectory, NotFound } from "#/errors.js"
 import { normalizeRelativePath } from "./paths.js"
 import type { SkillEntry } from "./source.js"

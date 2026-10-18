@@ -1,5 +1,5 @@
-import { HttpClient } from "@effect/platform"
 import { Duration, Effect } from "effect"
+import { HttpClient } from "effect/http"
 import { FetchFailed, NotFound } from "#/errors.js"
 
 export const httpGet = Effect.fn("httpGet")(function* (
@@ -9,7 +9,7 @@ export const httpGet = Effect.fn("httpGet")(function* (
 	const client = yield* HttpClient.HttpClient
 	return yield* client.get(url, headers === undefined ? undefined : { headers }).pipe(
 		Effect.timeout(Duration.seconds(20)),
-		Effect.catchAll(
+		Effect.catch(
 			(error) =>
 				new FetchFailed({
 					message: `Failed to fetch ${url}`,
@@ -31,7 +31,7 @@ export const fetchText = Effect.fn("fetchText")(function* (url: string) {
 		})
 	}
 	return yield* response.text.pipe(
-		Effect.catchAll(
+		Effect.catch(
 			(error) =>
 				new FetchFailed({
 					message: `Failed to read response body from ${url}`,

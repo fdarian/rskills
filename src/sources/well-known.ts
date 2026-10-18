@@ -1,5 +1,5 @@
-import { HttpClient } from "@effect/platform"
 import { Duration, Effect, Option } from "effect"
+import { HttpClient } from "effect/http"
 import { FetchFailed, IsDirectory, NotFound, ParseFailed } from "#/errors.js"
 import type { SourceOf } from "#/source.js"
 import { fetchText } from "./http.js"
@@ -23,7 +23,7 @@ function fetchIndexAt(indexUrl: string) {
 		const client = yield* HttpClient.HttpClient
 		const response = yield* client.get(indexUrl).pipe(
 			Effect.timeout(Duration.seconds(20)),
-			Effect.catchAll(
+			Effect.catch(
 				(error) =>
 					new FetchFailed({
 						message: `Failed to fetch well-known skills index from ${indexUrl}`,
@@ -46,7 +46,7 @@ function fetchIndexAt(indexUrl: string) {
 		}
 
 		const json = yield* response.json.pipe(
-			Effect.catchAll(
+			Effect.catch(
 				(error) =>
 					new ParseFailed({
 						message: `Failed to parse well-known skills index from ${indexUrl}`,
@@ -83,12 +83,12 @@ function fetchIndex(baseUrl: string) {
 			for (const root of roots) {
 				const indexUrl = `${root}/${wellKnownPath}/index.json`
 				tried.push(indexUrl)
-				const result = yield* Effect.either(fetchIndexAt(indexUrl))
-				if (result._tag === "Right") {
-					return { index: result.right, baseUrl: root, wellKnownPath } satisfies ResolvedIndex
+				const result = yield* Effect.result(fetchIndexAt(indexUrl))
+				if (result._tag === "Success") {
+					return { index: result.success, baseUrl: root, wellKnownPath } satisfies ResolvedIndex
 				}
-				if (result.left._tag !== "NotFound" && firstError === undefined) {
-					firstError = result.left
+				if (result.failure._tag !== "NotFound" && firstError === undefined) {
+					firstError = result.failure
 				}
 			}
 		}
