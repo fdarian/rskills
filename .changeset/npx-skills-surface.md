@@ -1,5 +1,5 @@
 ---
-"rskills-cli": major
+"rskills-cli": minor
 ---
 
 Breaking: `read`, `ls` and `search` now take the same sources as `npx skills add`, replacing the `<scheme>://` URIs.
