@@ -46,7 +46,7 @@ const fetchBlobPaths = Effect.fn("GitHubSource.fetchBlobPaths")(function* (
 	}
 
 	const json = yield* response.json.pipe(
-		Effect.catchAll(
+		Effect.catch(
 			(error) =>
 				new FetchFailed({
 					message: `Failed to parse GitHub Trees API response from ${url}`,
@@ -186,17 +186,17 @@ export const GitHubSource: SkillSource<GitHubSourceValue> = {
 		selector: Option.Option<string>,
 	) {
 		const ref = Option.getOrElse(source.ref, () => "HEAD")
-		const tree = yield* Effect.either(fetchBlobPaths(source, ref))
-		if (tree._tag === "Right") {
-			return yield* discoverFromTree(source, ref, tree.right, selector)
+		const tree = yield* Effect.result(fetchBlobPaths(source, ref))
+		if (tree._tag === "Success") {
+			return yield* discoverFromTree(source, ref, tree.success, selector)
 		}
-		if (tree.left._tag !== "RateLimited" || Option.isNone(selector)) {
-			return yield* tree.left
+		if (tree.failure._tag !== "RateLimited" || Option.isNone(selector)) {
+			return yield* tree.failure
 		}
 		const files = yield* fetchSkillsShDownload(source.owner, source.repo, selector.value)
 		if (files === null) {
 			return yield* new RateLimited({
-				message: `${tree.left.message}; the skills.sh fallback has no copy of ${source.owner}/${source.repo}@${selector.value} either`,
+				message: `${tree.failure.message}; the skills.sh fallback has no copy of ${source.owner}/${source.repo}@${selector.value} either`,
 			})
 		}
 		return [skillFromFileSet(selector.value, files)]

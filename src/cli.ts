@@ -39,8 +39,8 @@ cli.command("read", {
 	async run(c) {
 		const effect = readSkill({
 			source: c.args.source,
-			skill: Option.fromNullable(c.options.skill),
-			file: Option.fromNullable(c.options.file),
+			skill: Option.fromNullishOr(c.options.skill),
+			file: Option.fromNullishOr(c.options.file),
 			raw: c.options.raw === true,
 		})
 		try {
@@ -132,8 +132,8 @@ cli.command("ls", {
 	async run(c) {
 		const effect = listSkill({
 			source: c.args.source,
-			skill: Option.fromNullable(c.options.skill),
-			file: Option.fromNullable(c.options.file),
+			skill: Option.fromNullishOr(c.options.skill),
+			file: Option.fromNullishOr(c.options.file),
 		}).pipe(Effect.map((entries) => ({ entries: [...entries] })))
 		try {
 			return await Effect.runPromise(effect.pipe(Effect.provide(runtimeLayer)))

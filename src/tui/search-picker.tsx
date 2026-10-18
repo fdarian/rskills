@@ -59,7 +59,7 @@ function SearchPicker(props: SearchPickerProps) {
 	const [actionIndex, setActionIndex] = useState(0)
 	const [feedback, setFeedback] = useState<string | null>(null)
 
-	const fiberRef = useRef<Fiber.RuntimeFiber<void, never> | null>(null)
+	const fiberRef = useRef<Fiber.Fiber<void, never> | null>(null)
 	const queryRef = useRef(query)
 	queryRef.current = query
 

@@ -1,5 +1,6 @@
-import type { CommandExecutor, FileSystem, HttpClient, Path } from "@effect/platform"
-import type { Effect, Option } from "effect"
+import type { Effect, FileSystem, Option, Path } from "effect"
+import type { HttpClient } from "effect/http"
+import type { ChildProcessSpawner } from "effect/process"
 import type {
 	FetchFailed,
 	InvalidArgument,
@@ -38,7 +39,7 @@ export type SkillEnv =
 	| HttpClient.HttpClient
 	| FileSystem.FileSystem
 	| Path.Path
-	| CommandExecutor.CommandExecutor
+	| ChildProcessSpawner.ChildProcessSpawner
 
 /** A skill located inside a source. `read`/`list` are bound to wherever discovery found it. */
 export interface DiscoveredSkill {

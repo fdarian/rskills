@@ -1,5 +1,4 @@
-import { FileSystem, Path } from "@effect/platform"
-import { Effect, Option } from "effect"
+import { Effect, FileSystem, Option, Path } from "effect"
 import { FetchFailed, NotFound } from "#/errors.js"
 import type { SourceOf } from "#/source.js"
 import { isDirectory, listUnder, readFileUnder } from "./local-fs.js"
