@@ -3,7 +3,7 @@ import { Box, render, Text, useApp, useInput } from "ink"
 import { useEffect, useRef, useState } from "react"
 import { type AppRuntime, makeAppRuntime } from "#/runtime-layer.js"
 import { readSkill } from "#/skills.js"
-import { searchSkillsSh } from "#/sources/skills-sh.js"
+import { parseSkillIdentifier, searchSkillsSh } from "#/sources/skills-sh.js"
 import type { SkillSearchResult } from "#/sources/source.js"
 import { humanizeInstalls } from "./humanize.js"
 import { getInstallCommand } from "./install-command.js"
@@ -22,22 +22,8 @@ const ACTIONS = [
 
 type ActionKey = (typeof ACTIONS)[number]["key"]
 
-/** Derive the `owner/repo` identifier from a skills-sh id (`owner/repo/skillId`). */
 function deriveSource(identifier: string) {
-	const parts = identifier.split("/").filter((segment) => segment.length > 0)
-	if (parts.length >= 2) {
-		return `${parts[0]}/${parts[1]}`
-	}
-	return identifier
-}
-
-/** Convert a skills-sh id (`owner/repo/skillId`) to the `owner/repo@skillId` source form. */
-function toSkillSource(identifier: string) {
-	const parts = identifier.split("/").filter((segment) => segment.length > 0)
-	if (parts.length < 3) {
-		throw new Error(`Cannot derive skill coordinates from "${identifier}"`)
-	}
-	return `${parts[0]}/${parts[1]}@${parts.slice(2).join("/")}`
+	return parseSkillIdentifier(identifier).source
 }
 
 /** Index of the previous word boundary before `position` (skips trailing spaces, then a word). */
@@ -174,9 +160,10 @@ function SearchPicker(props: SearchPickerProps) {
 		}
 
 		if (actionKey === "copy-install") {
-			setFeedback("Fetching install command…")
-			const effect = getInstallCommand(selected.identifier).pipe(
-				Effect.flatMap((command) => copyToClipboard(command).pipe(Effect.as(command))),
+			const command = getInstallCommand(selected.identifier)
+			setFeedback("Copying install command…")
+			const effect = copyToClipboard(command).pipe(
+				Effect.as(command),
 				Effect.match({
 					onFailure: (error) => `Copy install failed: ${error.message}`,
 					onSuccess: (command) => `Copied install command: ${command}`,
@@ -186,7 +173,8 @@ function SearchPicker(props: SearchPickerProps) {
 			return
 		}
 
-		const url = `https://www.skills.sh/${selected.identifier}`
+		const parsed = parseSkillIdentifier(selected.identifier)
+		const url = `https://www.skills.sh/${parsed.source}/${parsed.skillId}`
 		setFeedback(`Opening ${url}…`)
 		const effect = openUrl(url).pipe(
 			Effect.match({
@@ -481,7 +469,7 @@ export async function runSearchPicker(options: {
 		const markdown = await runtime.runPromise(
 			Effect.gen(function* () {
 				return yield* readSkill({
-					source: toSkillSource(outcome.id),
+					source: outcome.id,
 					skill: Option.none(),
 					file: Option.none(),
 					raw: false,

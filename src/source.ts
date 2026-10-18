@@ -19,12 +19,8 @@ export type Source =
 
 export type SourceOf<Tag extends Source["_tag"]> = Extract<Source, { _tag: Tag }>
 
-const unsupportedHosts = new Set([
-	"gitlab.com",
-	"www.gitlab.com",
-	"bitbucket.org",
-	"raw.githubusercontent.com",
-])
+const rawGitHubHost = "raw.githubusercontent.com"
+const unsupportedHosts = new Set(["gitlab.com", "www.gitlab.com", "bitbucket.org", rawGitHubHost])
 const githubHosts = new Set(["github.com", "www.github.com"])
 
 function isLocalPath(input: string): boolean {
@@ -179,6 +175,10 @@ export function parseSource(
 			})
 			if (githubHosts.has(url.hostname)) {
 				return yield* parseGitHubUrl(url, input)
+			}
+			const isRawMarkdown = url.hostname === rawGitHubHost && url.pathname.endsWith(".md")
+			if (isRawMarkdown) {
+				return { _tag: "Url" as const, url: input }
 			}
 			if (unsupportedHosts.has(url.hostname) || url.pathname.endsWith(".git")) {
 				return yield* new UnsupportedSource({
