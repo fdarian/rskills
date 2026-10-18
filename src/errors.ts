@@ -14,6 +14,11 @@ export class ParseFailed extends Data.TaggedError("ParseFailed")<{
 	readonly cause?: unknown
 }> {}
 
+export class WriteFailed extends Data.TaggedError("WriteFailed")<{
+	readonly message: string
+	readonly cause?: unknown
+}> {}
+
 export class UnsupportedSource extends Data.TaggedError("UnsupportedSource")<{
 	readonly message: string
 }> {}

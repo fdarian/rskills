@@ -6,6 +6,7 @@ import {
 	parseFrontmatterName,
 } from "#/frontmatter.js"
 import { resolveSkill } from "#/skills.js"
+import { parseSource } from "#/source.js"
 import { type LibraryEntry, loadLibrary, writeLibrary } from "./store.js"
 
 export type { LibraryEntry } from "./store.js"
@@ -44,6 +45,9 @@ const sameTarget = (entry: LibraryEntry, source: string, skill: Option.Option<st
 
 export const addToLibrary = Effect.fn("addToLibrary")(function* (request: AddToLibraryRequest) {
 	const skill = yield* resolveSkill(request.source, request.skill)
+	// A relative local path would resolve against whatever cwd `read` later runs in.
+	const parsed = yield* parseSource(request.source)
+	const source = parsed._tag === "Local" ? parsed.path : request.source
 	const content = yield* skill.read(Option.none(), { raw: true })
 	const frontmatter = Option.fromNullishOr(parseFrontmatter(content).frontmatter)
 	const description = Option.flatMap(frontmatter, parseFrontmatterDescription)
@@ -63,7 +67,7 @@ export const addToLibrary = Effect.fn("addToLibrary")(function* (request: AddToL
 	if (existing === undefined) {
 		const entry: LibraryEntry = {
 			name,
-			source: request.source,
+			source,
 			...(skillOption !== undefined ? { skill: skillOption } : {}),
 			...(descriptionText !== undefined ? { description: descriptionText } : {}),
 			tags: [...new Set(request.tags)],
@@ -73,7 +77,7 @@ export const addToLibrary = Effect.fn("addToLibrary")(function* (request: AddToL
 		yield* writeLibrary([...entries, entry])
 		return entry
 	}
-	if (!sameTarget(existing, request.source, request.skill)) {
+	if (!sameTarget(existing, source, request.skill)) {
 		const saved =
 			existing.skill === undefined
 				? existing.source

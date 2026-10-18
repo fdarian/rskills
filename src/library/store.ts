@@ -1,6 +1,6 @@
 import { homedir } from "node:os"
 import { Config, Effect, FileSystem, Option, Path, Schema } from "effect"
-import { FetchFailed, ParseFailed } from "#/errors.js"
+import { ParseFailed, WriteFailed } from "#/errors.js"
 
 export const LibraryEntry = Schema.Struct({
 	name: Schema.String,
@@ -78,7 +78,7 @@ export const writeLibrary = Effect.fn("writeLibrary")(function* (
 		yield* fs.rename(temp, file)
 	}).pipe(
 		Effect.mapError(
-			(cause) => new FetchFailed({ message: `Failed to write library ${file}`, cause }),
+			(cause) => new WriteFailed({ message: `Failed to write library ${file}`, cause }),
 		),
 	)
 })
