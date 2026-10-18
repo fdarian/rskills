@@ -102,7 +102,8 @@ The shared Effect runtime is `src/runtime-layer.ts` (`runtimeLayer = Layer.merge
 
 ## Stack
 
-- **Bun** — runtime + package manager (`packageManager: bun@1.1.0`)
+- **pnpm** — package manager (`packageManager` in `package.json`)
+- **Bun** — script runtime + bundler (`Bun.build`, standalone binaries)
 - **incur** — CLI surface (zod schemas, structured output, TOON default). [Notes on incur](#incur-quirks) below.
 - **Effect.ts** — services, tagged errors, runtime composition
 - **`@effect/platform-node`** — portable Node runtime services (`NodeContext`) for filesystem, path, and command execution
@@ -122,16 +123,16 @@ The shared Effect runtime is `src/runtime-layer.ts` (`runtimeLayer = Layer.merge
 ## Commands
 
 ```bash
-bun install
-bun run check:type   # tsc --noEmit
-bun run check:lint   # biome check .
-bun run check        # CI baseline: type + lint
-bun run build        # bundle to single node-runnable dist/cli.js
-bun run build:binaries  # compile standalone executables (--compile --bytecode) for darwin/linux
+pnpm install
+pnpm run check:type   # tsc --noEmit
+pnpm run check:lint   # biome check .
+pnpm run check        # CI baseline: type + lint
+pnpm run build        # bundle to single node-runnable dist/cli.js
+pnpm run build:binaries  # compile standalone executables (--compile --bytecode) for darwin/linux
 bun run src/cli.ts read anthropics/skills@pdf
 ```
 
-CI runs `.github/workflows/check.yml`: format-and-commit first, then `bun run check`.
+CI runs `.github/workflows/check.yml`: format-and-commit first, then `pnpm run check`.
 
 ## Incur quirks
 
