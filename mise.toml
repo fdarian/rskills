@@ -1,0 +1,3 @@
+# Keeps dev runs off your real ~/.config/rskills library; each worktree gets its own.
+[env]
+RSKILLS_DATA_DIR = "{{config_root}}/.data"

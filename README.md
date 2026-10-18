@@ -56,7 +56,7 @@ rskills ls anthropics/skills@xlsx --file scripts   # a subdirectory
 
 ### Search
 
-Searches [skills.sh](https://skills.sh). On an interactive terminal (no `--format`, `--json`, or `--token-*`), `search` opens a live picker: type to search, ↑/↓ to navigate, Enter for an action menu (read SKILL.md / copy identifier / copy install command / open on skills.sh), Esc to quit.
+Searches [skills.sh](https://skills.sh). On an interactive terminal (no `--format`, `--json`, or `--token-*`), `search` opens a live picker: type to search, ↑/↓ to navigate, Enter for an action menu (read SKILL.md / copy identifier / copy install command / open on skills.sh / save to or remove from your [library](#library)), Esc to quit.
 
 ```bash
 rskills search                 # interactive picker (TTY only)
@@ -77,11 +77,41 @@ Results carry an `owner/repo@skill` identifier you can pass straight to `read` o
 
 </details>
 
+### Library
+
+Keep a personal list of skills you like and search it later.
+
+```bash
+rskills lib add anthropics/skills --skill pdf --tags docs,pdf --note "form filling"
+rskills lib add ./my-skills/review --as my-review   # name it yourself
+rskills lib search                  # everything saved
+rskills lib search pdf --tags docs  # words must match; entries need every tag
+rskills lib rm pdf
+```
+
+`lib add` takes the same `<source>` and `--skill` as `read`, and fails before saving if the source doesn't resolve to exactly one skill. Entries are named after the skill (`--as` overrides) and the name is unique, ignoring case. Adding the same source again refreshes its description and merges tags; a different source under a taken name is rejected until you pass `--as`.
+
+`lib search` is non-interactive: every word of the query must appear in an entry's name, description, tags, note or source, with exact and partial name matches ranked first. `rskills read <source>` of a saved entry's `source` (plus `--skill`) prints the skill.
+
+In the `search` picker, Enter on a result offers **Save to library** (or **Remove from library** when it is already saved); saved results are marked with ★.
+
+<details>
+<summary>Where it's stored</summary>
+
+One JSON file, at `$RSKILLS_DATA_DIR/library.json`, else `$XDG_CONFIG_HOME/rskills/library.json`, else `~/.config/rskills/library.json`. It sits in the config directory so you can keep it in your dotfiles.
+
+Each entry is a reference, not a copy of the skill: its name, the `source` (and `--skill`) you passed, the `description` from `SKILL.md` frontmatter at save time, tags, an optional note, and when it was added. Skill content is always fetched fresh by `read`, so re-run `lib add` to refresh the description. Local paths are saved as absolute paths.
+
+A missing file is an empty library; an unreadable or invalid file is an error that names the path, and the picker disables saving rather than overwrite it.
+
+</details>
+
 ## Output
 
 - `read` prints **raw markdown** to stdout regardless of `--format`. Pipe it anywhere.
 - `ls` prints structured `{ entries: [{ name, type }] }`, TOON by default, switchable with `--format json|yaml|md|jsonl`.
 - `search` prints structured results (`{ identifier, name, installs?, source }`) when not interactive, in the same formats.
+- `lib add` and `lib rm` print the entry, `lib search` prints `{ results: [...] }`, in the same formats.
 - Errors exit with non-zero status and print a short message.
 
 ## Built-ins from incur

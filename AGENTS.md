@@ -8,7 +8,8 @@ A Bun + Effect.ts CLI for reading remote [skills](https://agentskills.io/) witho
 
 - `rskills read <source>[@skill] [--skill <name>] [--file <path>] [--raw]` — print a skill file (default `SKILL.md`) to stdout. Frontmatter is stripped; `--raw` returns the literal file, no envelope, in any `--format`. A directory `--file` exits non-zero with `IsDirectory` pointing to `rskills ls`.
 - `rskills ls <source>[@skill] [--skill <name>] [--file <dir>]` — structured `{ entries: [{ name, type }] }` (mirrors Anthropic's `ls`/`Glob`: `read` is files-only, `ls` is directories). On a multi-skill source with no selector it lists the skill names as `directory` entries instead of erroring.
-- `rskills search [query] [--limit <n>]` — skills.sh search only; results are `{ identifier, name, installs?, source }` where `identifier` is `owner/repo@skill` or, for well-known sites, `host.tld@skill`; both feed straight into `rskills read`. skills.sh ids of any other shape are skipped, not fatal. On an interactive terminal (stdin + stdout both TTY, no `--format`/`--json`/`--token-*`) opens a live Ink picker: type to search (debounced 250 ms, race-safe via Effect fiber interruption), ↑/↓ to navigate, Enter for an action menu (read SKILL.md / copy identifier / copy install command / open on skills.sh), Esc to quit. Otherwise emits structured output (TOON by default); `query` is required there.
+- `rskills lib add <source> [--skill <name>] [--tags a,b] [--note <text>] [--as <name>]` / `lib rm <name>` / `lib search [query] [--tags a,b] [--limit <n>]` — a personal library of saved skill references (see [Library](#library)). `add` returns the entry, `rm` `{ removed }`, `search` `{ results }`; `lib search` is never interactive.
+- `rskills search [query] [--limit <n>]` — skills.sh search only; results are `{ identifier, name, installs?, source }` where `identifier` is `owner/repo@skill` or, for well-known sites, `host.tld@skill`; both feed straight into `rskills read`. skills.sh ids of any other shape are skipped, not fatal. On an interactive terminal (stdin + stdout both TTY, no `--format`/`--json`/`--token-*`) opens a live Ink picker: type to search (debounced 250 ms, race-safe via Effect fiber interruption), ↑/↓ to navigate, Enter for an action menu (read SKILL.md / copy identifier / copy install command / open on skills.sh / save to or remove from the library), Esc to quit. Otherwise emits structured output (TOON by default); `query` is required there.
 
 ## Source parsing
 
@@ -100,6 +101,17 @@ YAML frontmatter stripping is applied to every source in `readSkill` (`src/front
 
 The shared Effect runtime is `src/runtime-layer.ts` (`runtimeLayer = Layer.mergeAll(FetchHttpClient.layer, NodeServices.layer)`): HTTP providers use `HttpClient`, `Local`/`Claude` and the TUI use `FileSystem` + `Path` + `ChildProcessSpawner` (`effect/process`) from `NodeServices`. Ink, React, and ink-text-input are devDependencies bundled into `dist/cli.js`.
 
+## Library
+
+`src/library/`: `store.ts` (path, `Schema`-validated load, atomic write) and `library.ts` (`addToLibrary`, `removeFromLibrary`, `searchLibrary`, `findSaved`). Commands are the `lib` sub-CLI in `src/cli.ts`.
+
+- **File**: `$RSKILLS_DATA_DIR/library.json` → `$XDG_CONFIG_HOME/rskills/library.json` → `~/.config/rskills/library.json`; `{ version: 1, skills: Entry[] }`, tab-indented, sorted by name, written via `<path>.tmp` + rename. A missing file is an empty library; unreadable/invalid → `ParseFailed` with the path; write errors → `WriteFailed`.
+- **Entry**: `{ name, source, skill?, description?, tags, note?, addedAt }`. A reference, never skill content. `source`/`skill` are stored as passed to `lib add` (so `read <source> [--skill]` resolves to it), except `Local` sources, stored as the absolute path. `description` is `SKILL.md` frontmatter at save time (`parseFrontmatterDescription`, incl. block scalars).
+- **Key**: `name`, case-insensitive. Defaults to frontmatter `name`, else the discovered skill's name; `--as` overrides.
+- **Add**: resolves via `resolveSkill` (`src/skills.ts`, the same path as `readSkill`) before writing, so bad/ambiguous sources fail without a save. New name → insert. Same name + same `source`/`skill` → update (description refreshed, tags unioned, note replaced only if given, `addedAt` kept). Same name, different target → `InvalidArgument` pointing at `--as`.
+- **Search**: whitespace-split query, every token a case-insensitive substring of name/description/tags/note/source; `--tags` requires all. Ranked exact name, name contains the query, rest; ties by name. No query lists all.
+- **Picker** (`src/tui/search-picker.tsx`): loads the library once; save/remove actions appear only when it loaded (a broken file is never overwritten) and update local state. Saved results get a ★. A result counts as saved via `findSaved`: `source` equals the `owner/repo@skill` identifier and the entry has no `skill`, so entries saved as `owner/repo --skill x` don't show a ★.
+
 ## Stack
 
 - **pnpm** — package manager (`packageManager` in `package.json`)
@@ -131,6 +143,8 @@ pnpm run build        # bundle to single node-runnable dist/cli.js
 pnpm run build:binaries  # compile standalone executables (--compile --bytecode) for darwin/linux
 bun run src/cli.ts read anthropics/skills@pdf
 ```
+
+`mise.toml` sets `RSKILLS_DATA_DIR` to `./.data` for dev runs, so the library stays out of your real `~/.config`; `.config/wt.toml` creates `.data` in new worktrees.
 
 CI runs `.github/workflows/check.yml`: format-and-commit first, then `pnpm run check`.
 

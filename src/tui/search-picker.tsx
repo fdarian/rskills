@@ -1,6 +1,13 @@
 import { Effect, Fiber, Option } from "effect"
 import { Box, render, Text, useApp, useInput } from "ink"
 import { useEffect, useRef, useState } from "react"
+import {
+	addToLibrary,
+	findSaved,
+	type LibraryEntry,
+	loadLibrary,
+	removeFromLibrary,
+} from "#/library/library.js"
 import { type AppRuntime, makeAppRuntime } from "#/runtime-layer.js"
 import { readSkill } from "#/skills.js"
 import { parseSkillIdentifier, searchSkillsSh } from "#/sources/skills-sh.js"
@@ -13,14 +20,47 @@ type PickerOutcome = { readonly kind: "quit" } | { readonly kind: "read"; readon
 
 type SearchStatus = "idle" | "loading" | "ready" | "error"
 
-const ACTIONS = [
-	{ key: "read", label: "Read SKILL.md" },
-	{ key: "copy-id", label: "Copy identifier" },
-	{ key: "copy-install", label: "Copy install command" },
-	{ key: "open", label: "Open on skills.sh" },
-] as const
+type ActionKey = "read" | "copy-id" | "copy-install" | "open" | "save" | "remove"
 
-type ActionKey = (typeof ACTIONS)[number]["key"]
+type Action = { readonly key: ActionKey; readonly label: string }
+
+/** Failing to load the library must not block searching, so it is state rather than a crash. */
+type LibraryState =
+	| { readonly kind: "loading" }
+	| { readonly kind: "ready"; readonly entries: ReadonlyArray<LibraryEntry> }
+	| { readonly kind: "error"; readonly message: string }
+
+function savedEntry(library: LibraryState, identifier: string) {
+	return library.kind === "ready" ? findSaved(library.entries, identifier) : Option.none()
+}
+
+/** Save/remove is offered only once the library loaded, so a broken file is never overwritten. */
+function buildActions(library: LibraryState, identifier: string): ReadonlyArray<Action> {
+	const actions: ReadonlyArray<Action> = [
+		{ key: "read", label: "Read SKILL.md" },
+		{ key: "copy-id", label: "Copy identifier" },
+		{ key: "copy-install", label: "Copy install command" },
+		{ key: "open", label: "Open on skills.sh" },
+	]
+	if (library.kind !== "ready") {
+		return actions
+	}
+	return Option.isSome(findSaved(library.entries, identifier))
+		? [...actions, { key: "remove", label: "Remove from library" }]
+		: [...actions, { key: "save", label: "Save to library" }]
+}
+
+const SAVED_MARKER = " ★"
+
+function savedMarker(library: LibraryState, identifier: string) {
+	return Option.isSome(savedEntry(library, identifier)) ? SAVED_MARKER : ""
+}
+
+function libraryErrorLine(message: string) {
+	return `Library unavailable, saving disabled: ${message}`
+}
+
+const sameName = (a: string, b: string) => a.toLowerCase() === b.toLowerCase()
 
 function deriveSource(identifier: string) {
 	return parseSkillIdentifier(identifier).source
@@ -58,10 +98,21 @@ function SearchPicker(props: SearchPickerProps) {
 	const [screen, setScreen] = useState<"search" | "actions">("search")
 	const [actionIndex, setActionIndex] = useState(0)
 	const [feedback, setFeedback] = useState<string | null>(null)
+	const [library, setLibrary] = useState<LibraryState>({ kind: "loading" })
 
 	const fiberRef = useRef<Fiber.Fiber<void, never> | null>(null)
 	const queryRef = useRef(query)
 	queryRef.current = query
+
+	useEffect(() => {
+		const effect = loadLibrary().pipe(
+			Effect.match({
+				onFailure: (error): LibraryState => ({ kind: "error", message: error.message }),
+				onSuccess: (entries): LibraryState => ({ kind: "ready", entries }),
+			}),
+		)
+		props.runtime.runPromise(effect).then(setLibrary)
+	}, [props.runtime])
 
 	useEffect(() => {
 		if (query.length === 0) {
@@ -122,13 +173,17 @@ function SearchPicker(props: SearchPickerProps) {
 		})
 	}
 
+	const selectedResult = results[selectedIndex]
+	const actions =
+		selectedResult === undefined ? [] : buildActions(library, selectedResult.identifier)
+
 	const moveAction = (delta: number) => {
 		setActionIndex((index) => {
 			const next = index + delta
 			if (next < 0) {
-				return ACTIONS.length - 1
+				return actions.length - 1
 			}
-			if (next > ACTIONS.length - 1) {
+			if (next > actions.length - 1) {
 				return 0
 			}
 			return next
@@ -173,6 +228,63 @@ function SearchPicker(props: SearchPickerProps) {
 			return
 		}
 
+		if (actionKey === "save") {
+			setFeedback(`Saving ${selected.identifier}…`)
+			const effect = addToLibrary({
+				source: selected.identifier,
+				skill: Option.none(),
+				tags: [],
+				note: Option.none(),
+				as: Option.none(),
+			}).pipe(
+				Effect.match({
+					onFailure: (error) => `Save failed: ${error.message}`,
+					onSuccess: (saved) => {
+						setLibrary((current) =>
+							current.kind === "ready"
+								? {
+										kind: "ready",
+										entries: [
+											...current.entries.filter((entry) => !sameName(entry.name, saved.name)),
+											saved,
+										],
+									}
+								: current,
+						)
+						return `Saved to library as ${saved.name}`
+					},
+				}),
+			)
+			props.runtime.runPromise(effect).then(setFeedback)
+			return
+		}
+
+		if (actionKey === "remove") {
+			const saved = savedEntry(library, selected.identifier)
+			if (Option.isNone(saved)) {
+				return
+			}
+			setFeedback(`Removing ${saved.value.name}…`)
+			const effect = removeFromLibrary(saved.value.name).pipe(
+				Effect.match({
+					onFailure: (error) => `Remove failed: ${error.message}`,
+					onSuccess: (removed) => {
+						setLibrary((current) =>
+							current.kind === "ready"
+								? {
+										kind: "ready",
+										entries: current.entries.filter((entry) => !sameName(entry.name, removed.name)),
+									}
+								: current,
+						)
+						return `Removed from library: ${removed.name}`
+					},
+				}),
+			)
+			props.runtime.runPromise(effect).then(setFeedback)
+			return
+		}
+
 		const parsed = parseSkillIdentifier(selected.identifier)
 		const url = `https://www.skills.sh/${parsed.source}/${parsed.skillId}`
 		setFeedback(`Opening ${url}…`)
@@ -201,7 +313,7 @@ function SearchPicker(props: SearchPickerProps) {
 				return
 			}
 			if (key.return) {
-				const action = ACTIONS[actionIndex]
+				const action = actions[actionIndex]
 				if (action !== undefined) {
 					runAction(action.key)
 				}
@@ -271,9 +383,11 @@ function SearchPicker(props: SearchPickerProps) {
 	if (screen === "actions") {
 		return (
 			<ActionsScreen
-				result={results[selectedIndex]}
+				result={selectedResult}
+				actions={actions}
 				actionIndex={actionIndex}
 				feedback={feedback}
+				libraryError={library.kind === "error" ? library.message : null}
 			/>
 		)
 	}
@@ -286,6 +400,7 @@ function SearchPicker(props: SearchPickerProps) {
 			status={status}
 			errorMessage={errorMessage}
 			selectedIndex={selectedIndex}
+			library={library}
 		/>
 	)
 }
@@ -310,6 +425,7 @@ type SearchScreenProps = {
 	readonly status: SearchStatus
 	readonly errorMessage: string | null
 	readonly selectedIndex: number
+	readonly library: LibraryState
 }
 
 function SearchScreen(props: SearchScreenProps) {
@@ -325,8 +441,14 @@ function SearchScreen(props: SearchScreenProps) {
 					status={props.status}
 					errorMessage={props.errorMessage}
 					selectedIndex={props.selectedIndex}
+					library={props.library}
 				/>
 			</Box>
+			{props.library.kind === "error" ? (
+				<Box marginTop={1}>
+					<Text color="yellow">{`  ${libraryErrorLine(props.library.message)}`}</Text>
+				</Box>
+			) : null}
 			<Box marginTop={1}>
 				<Text dimColor>↑↓ · enter · esc quit · {props.results.length} results</Text>
 			</Box>
@@ -339,6 +461,7 @@ type SearchBodyProps = {
 	readonly status: SearchStatus
 	readonly errorMessage: string | null
 	readonly selectedIndex: number
+	readonly library: LibraryState
 }
 
 function SearchBody(props: SearchBodyProps) {
@@ -349,7 +472,9 @@ function SearchBody(props: SearchBodyProps) {
 		const skillsColumnWidth = Math.max(
 			"  Skills".length,
 			...props.results.map(
-				(result) => `  ${result.name} ${deriveSource(result.identifier)}`.length,
+				(result) =>
+					`  ${result.name} ${deriveSource(result.identifier)}${savedMarker(props.library, result.identifier)}`
+						.length,
 			),
 		)
 		return (
@@ -368,6 +493,7 @@ function SearchBody(props: SearchBodyProps) {
 						result={result}
 						selected={index === props.selectedIndex}
 						columnWidth={skillsColumnWidth}
+						saved={Option.isSome(savedEntry(props.library, result.identifier))}
 					/>
 				))}
 			</Box>
@@ -386,6 +512,7 @@ function ResultRow(props: {
 	readonly result: SkillSearchResult
 	readonly selected: boolean
 	readonly columnWidth: number
+	readonly saved: boolean
 }) {
 	const source = deriveSource(props.result.identifier)
 	const installs =
@@ -398,6 +525,7 @@ function ResultRow(props: {
 					{`${prefix}${props.result.name}`}
 				</Text>
 				<Text dimColor>{` ${source}`}</Text>
+				{props.saved ? <Text color="green">{SAVED_MARKER}</Text> : null}
 			</Box>
 			<Box marginLeft={2}>
 				<Text>{installs}</Text>
@@ -408,8 +536,10 @@ function ResultRow(props: {
 
 type ActionsScreenProps = {
 	readonly result: SkillSearchResult | undefined
+	readonly actions: ReadonlyArray<Action>
 	readonly actionIndex: number
 	readonly feedback: string | null
+	readonly libraryError: string | null
 }
 
 function ActionsScreen(props: ActionsScreenProps) {
@@ -423,7 +553,7 @@ function ActionsScreen(props: ActionsScreenProps) {
 				<Text dimColor>{` ${deriveSource(props.result.identifier)}`}</Text>
 			</Box>
 			<Box flexDirection="column" marginTop={1}>
-				{ACTIONS.map((action, index) => (
+				{props.actions.map((action, index) => (
 					<Text
 						key={action.key}
 						{...(index === props.actionIndex ? { color: "cyan" as const } : {})}
@@ -432,6 +562,11 @@ function ActionsScreen(props: ActionsScreenProps) {
 					</Text>
 				))}
 			</Box>
+			{props.libraryError !== null ? (
+				<Box marginTop={1}>
+					<Text color="yellow">{`  ${libraryErrorLine(props.libraryError)}`}</Text>
+				</Box>
+			) : null}
 			{props.feedback !== null ? (
 				<Box marginTop={1}>
 					<Text>{`  ${props.feedback}`}</Text>
